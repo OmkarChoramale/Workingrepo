@@ -14,10 +14,6 @@ public class DashboardController {
 
     private final DashboardService dashboardService;
 
-    /**
-     * Fetch dashboard stats. 
-     * Identifies the user via headers injected by the API Gateway.
-     */
     @GetMapping("/stats")
     public ResponseEntity<DashboardDTO> getDashboardStats(
             @RequestHeader("X-User-Roles") String role, 

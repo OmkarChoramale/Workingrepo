@@ -31,7 +31,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final UserClient userClient;
     private final EmailService emailService;
 
-    // ─── CREATE ──────────────────────────────────────────────────────────────
+    // ─── CREATE (Updated for Fault-Tolerance) ──────────────────────────────────
 
     @Override
     @Transactional
@@ -40,19 +40,31 @@ public class NotificationServiceImpl implements NotificationService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Recipient userId is required.");
         }
 
-        UserDTO user;
+        // 1. Fetch user metadata (Email/Name) OPTIONALLY
+        // Logic: Try to get user details for the email, but don't crash if it fails (robustness)
+        String recipientEmail = null;
+        String recipientName = "User";
+        
         try {
-            user = userClient.getUserById(request.getUserId());
+            UserDTO user = userClient.getUserById(request.getUserId());
+            if (user != null) {
+                recipientEmail = user.getEmail();
+                recipientName = user.getName();
+            }
         } catch (Exception e) {
-            throw new ResourceNotFoundException("User not found with id: " + request.getUserId());
+            // Log the warning but DO NOT throw exception. This allows notifications 
+            // to be saved even if the User Service transaction isn't committed yet.
+            log.warn("Non-critical: Could not fetch user details for userId={} (Proceeding with defaults)", request.getUserId());
         }
 
+        // 2. Default category logic
         if (request.getCategory() == null) {
-            request.setCategory(NotificationCategory.SYSTEM);
+            request.setCategory(NotificationCategory.SYSTEM_CREATE);
         }
 
+        // 3. Build and save the Notification
         Notification notification = Notification.builder()
-                .userId(user.getUserId())
+                .userId(request.getUserId())
                 .entityId(request.getEntityId() != null ? request.getEntityId() : 0L)
                 .subject(request.getSubject())
                 .message(request.getMessage())
@@ -60,17 +72,20 @@ public class NotificationServiceImpl implements NotificationService {
                 .status(NotificationStatus.UNREAD)
                 .build();
 
+        // Use saveAndFlush to ensure it hits the DB immediately
         Notification saved = notificationRepository.saveAndFlush(notification);
-        log.info("Notification created: id={} for userId={}", saved.getNotificationId(), user.getUserId());
+        log.info("Notification created: id={} for userId={}", saved.getNotificationId(), request.getUserId());
 
-        // Email is non-critical — failure does NOT rollback
-        try {
-            emailService.sendNotificationEmail(user.getEmail(), user.getName(), request.getSubject(), request.getMessage());
-        } catch (Exception e) {
-            log.warn("Email failed for userId={}: {}", user.getUserId(), e.getMessage());
+        // 4. Email is non-critical — failure does NOT rollback
+        if (recipientEmail != null) {
+            try {
+                emailService.sendNotificationEmail(recipientEmail, recipientName, request.getSubject(), request.getMessage());
+            } catch (Exception e) {
+                log.warn("Email failed for userId={}: {}", request.getUserId(), e.getMessage());
+            }
         }
 
-        return toDTO(saved, user.getName());
+        return toDTO(saved, recipientName);
     }
 
     // ─── BROADCAST ───────────────────────────────────────────────────────────
@@ -91,7 +106,7 @@ public class NotificationServiceImpl implements NotificationService {
         }
 
         if (request.getCategory() == null) {
-            request.setCategory(NotificationCategory.SYSTEM);
+            request.setCategory(NotificationCategory.SYSTEM_CREATE);
         }
 
         List<UserDTO> allUsers;

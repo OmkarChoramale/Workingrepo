@@ -35,17 +35,19 @@ public class MicroserviceSecurityConfig {
                 // ==========================================
                 // INTERNAL: Service-to-Service endpoints (no auth required)
                 // ==========================================
-                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/notifications/system-alert").permitAll()
+                // Allow other microservices to send notifications via Feign
+                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/notifications").permitAll()
                 .requestMatchers(HttpMethod.GET,  "/tourismgov/v1/notifications/internal/**").permitAll()
-                // Broadcast is open to internal Feign calls too — role check is in the service layer
+                // Broadcast is open to internal Feign calls too
                 .requestMatchers(HttpMethod.POST, "/tourismgov/v1/notifications/broadcast").permitAll()
+                
+                // ✅ FIXED: Allow internal dashboard calls to fetch unread counts without a JWT
+                .requestMatchers(HttpMethod.GET,  "/tourismgov/v1/notifications/unread").permitAll()
 
                 // ==========================================
-                // NOTIFICATION ENDPOINTS — require authenticated user (X-User-Id from Gateway)
+                // NOTIFICATION ENDPOINTS — require authenticated user
                 // ==========================================
-                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/notifications").authenticated()
                 .requestMatchers(HttpMethod.GET,  "/tourismgov/v1/notifications").authenticated()
-                .requestMatchers(HttpMethod.GET,  "/tourismgov/v1/notifications/unread").authenticated()
                 .requestMatchers(HttpMethod.GET,  "/tourismgov/v1/notifications/category/**").authenticated()
                 .requestMatchers(HttpMethod.PATCH,"/tourismgov/v1/notifications/*/read").authenticated()
                 .requestMatchers(HttpMethod.PATCH,"/tourismgov/v1/notifications/read-all").authenticated()

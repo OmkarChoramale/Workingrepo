@@ -24,6 +24,7 @@ import com.tourismgov.tourist.model.Tourist;
 import com.tourismgov.tourist.model.TouristDocument;
 import com.tourismgov.tourist.repository.TouristDocumentRepository;
 import com.tourismgov.tourist.repository.TouristRepository;
+import com.tourismgov.tourist.security.SecurityUtils;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,17 +38,19 @@ public class TouristDocumentServiceImpl implements TouristDocumentService {
 	private final TouristDocumentRepository documentRepository;
 	private final TouristRepository touristRepository;
 	private final TouristMapper touristMapper; 
-
+	private final SecurityUtils securityUtils;
+	
 	@Override
 	@Transactional
-	public TouristDocumentResponse uploadDocument(Long touristId, DocumentUploadRequest request) {
-		log.info("Uploading document for touristId={} with docType={}", touristId, request.getDocType());
+	public TouristDocumentResponse uploadDocument(Long userId, DocumentUploadRequest request) {
+		log.info("Uploading document for touristId={} with docType={}", userId, request.getDocType());
 
 		// Validate tourist
-		Tourist tourist = touristRepository.findById(touristId)
-				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-						String.format("Tourist not found with id %d", touristId)));
-
+		Tourist tourist = touristRepository.findByUserId(userId)
+	            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, 
+	                    "No tourist profile found for the current user"));
+		securityUtils.validateAccess(tourist.getUserId());
+		Long touristId = tourist.getTouristId();
 		// Prevent duplicate docType per tourist
 		boolean exists = tourist.getDocuments().stream()
 				.anyMatch(d -> d.getDocType().equalsIgnoreCase(request.getDocType()));
@@ -104,7 +107,7 @@ public class TouristDocumentServiceImpl implements TouristDocumentService {
 	public TouristDocumentResponse verifyDocument(Long touristId, Long documentId, DocumentVerifyRequest request) {
 		log.info("Verifying document {} for tourist {}", documentId, touristId);
 		TouristDocument doc = getTouristDocumentOrThrow(touristId, documentId);
-
+		securityUtils.validateAccess(doc.getTourist().getUserId());
 		VerificationStatus newStatus;
 		try {
 			newStatus = VerificationStatus.valueOf(request.getStatus().toUpperCase());
@@ -127,11 +130,11 @@ public class TouristDocumentServiceImpl implements TouristDocumentService {
 	}
 
 	@Override
-	public TouristDocumentResponse getDocumentMetadata(Long touristId, Long documentId) {
-		log.info("Fetching metadata for document {} of tourist {}", documentId, touristId);
-		TouristDocument doc = getTouristDocumentOrThrow(touristId, documentId);
-		log.info("Metadata fetched successfully for document {} of tourist {}", documentId, touristId);
-		
+	public TouristDocumentResponse getDocumentMetadata(Long userId, Long documentId) {
+		log.info("Fetching metadata for document {} of tourist {}", documentId, userId);
+		TouristDocument doc = getTouristDocumentByUserOrThrow(userId, documentId);
+		log.info("Metadata fetched successfully for document {} of tourist {}", documentId, userId);
+		securityUtils.validateAccess(doc.getTourist().getUserId());
 		// Use Mapper for response
 		return touristMapper.toDocumentResponse(doc);
 	}
@@ -140,9 +143,11 @@ public class TouristDocumentServiceImpl implements TouristDocumentService {
 	@Transactional
 	public void deleteDocument(Long touristId, Long documentId) {
 		log.info("Deleting document {} for tourist {}", documentId, touristId);
+		securityUtils.validateAdminOrStaff();
+		
 		TouristDocument doc = getTouristDocumentOrThrow(touristId, documentId);
 		Tourist tourist = doc.getTourist();
-
+		
 		try {
 			String fileUri = doc.getFileUri();
 			if (fileUri != null && !(fileUri.startsWith("http://") || fileUri.startsWith("https://"))) {
@@ -170,6 +175,18 @@ public class TouristDocumentServiceImpl implements TouristDocumentService {
 						String.format(TouristErrorMessage.ERROR_DOCUMENT_NOT_FOUND, documentId, touristId)));
 	}
 
+	private TouristDocument getTouristDocumentByUserOrThrow(Long userId, Long documentId) {
+		// 1. Find tourist profile using the userId
+		Tourist tourist = touristRepository.findByUserId(userId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+						"No tourist profile found for the current user"));
+
+		// 2. Find the document using the fetched touristId
+		return documentRepository.findByDocumentIdAndTourist_TouristId(documentId, tourist.getTouristId())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+						String.format(TouristErrorMessage.ERROR_DOCUMENT_NOT_FOUND, documentId, tourist.getTouristId())));
+	}
+	
 	private void syncTouristStatus(Tourist tourist) {
 		List<TouristDocument> docs = tourist.getDocuments();
 		if (docs == null || docs.isEmpty()) {

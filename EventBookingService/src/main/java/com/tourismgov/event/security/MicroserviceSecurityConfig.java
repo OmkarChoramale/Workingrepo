@@ -33,6 +33,12 @@ public class MicroserviceSecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 
                 // ==========================================
+                // INTERNAL: Service-to-Service endpoints (no auth required)
+                // ==========================================
+                // ✅ FIXED: Allow Report Service to fetch all bookings for dashboard metrics
+                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/bookings").permitAll()
+                
+                // ==========================================
                 // 1. EVENT ENDPOINTS (/tourismgov/v1/events)
                 // ==========================================
                 // Anyone can view events and paged events

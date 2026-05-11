@@ -6,6 +6,7 @@ import com.tourismgov.report.dto.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -27,44 +28,43 @@ public class DashboardServiceImpl implements DashboardService {
     private final NotificationClient notificationClient;
 
     @Override
+    @Transactional(readOnly = true)
     public DashboardDTO getDashboardMetrics(String role, Long userId) {
-        // Step 1: Initial User Verification (Blocking because we need the role to proceed)
+        // Step 1: Initial User Verification
         UserDTO user = userClient.getUserById(userId);
         if (user == null) {
             throw new RuntimeException("User not found with ID: " + userId);
         }
 
         String dbRole = user.getRole().name().toUpperCase();
-        // Gateway injects 'ROLE_ADMIN'; DB stores 'ADMIN' — strip the prefix for comparison
         String headerRole = role.toUpperCase().replace("ROLE_", "");
         if (!dbRole.equals(headerRole)) {
-            log.warn("Role mismatch: DB={} Header={}", dbRole, headerRole);
-            // Don't hard-fail — the gateway already validated the token, just log it
+            log.warn("Security Alert: Role mismatch detected. DB={} Header={}", dbRole, headerRole);
         }
 
         // Step 2: Parallel Data Fetching (The Aggregator Pattern)
-        // We fetch everything concurrently to reduce load time from seconds to milliseconds
         CompletableFuture<List<SiteDTO>> sitesFuture = CompletableFuture.supplyAsync(() -> 
             handleFetch(siteClient::getAllSites, "Sites"));
         
         CompletableFuture<List<EventDTO>> eventsFuture = CompletableFuture.supplyAsync(() -> 
             handleFetch(eventClient::getAllEvents, "Events"));
         
-        CompletableFuture<List<NotificationDTO>> notificationsFuture = CompletableFuture.supplyAsync(() -> 
+        CompletableFuture<List<NotificationRequestDTO>> notificationsFuture = CompletableFuture.supplyAsync(() -> 
             handleFetch(() -> notificationClient.getUnreadNotifications(userId), "Notifications"));
         
         CompletableFuture<List<BookingDTO>> bookingsFuture = CompletableFuture.supplyAsync(() -> 
             handleFetch(bookingClient::getAllBookings, "Bookings"));
 
-        // Wait for core metrics to finish
+        // Wait for all non-blocking futures to complete
         CompletableFuture.allOf(sitesFuture, eventsFuture, notificationsFuture, bookingsFuture).join();
 
-        // Step 3: Processing Common Metrics
+        // Step 3: Extract results
         List<SiteDTO> allSites = sitesFuture.join();
         List<EventDTO> allEvents = eventsFuture.join();
-        List<NotificationDTO> unreadNotifications = notificationsFuture.join();
+        List<NotificationRequestDTO> unreadNotifications = notificationsFuture.join();
         List<BookingDTO> allBookings = bookingsFuture.join();
 
+        // Step 4: Common Metric Calculations
         Map<String, Object> metrics = new LinkedHashMap<>();
         long totalS = allSites.size();
         long activeS = allSites.stream().filter(s -> "ACTIVE".equalsIgnoreCase(s.getStatus())).count();
@@ -73,7 +73,7 @@ public class DashboardServiceImpl implements DashboardService {
         metrics.put("siteActivityPct", calculatePercentage(activeS, totalS) + "%");
         metrics.put("activeEvents", allEvents.stream().filter(e -> "ACTIVE".equalsIgnoreCase(e.getStatus())).count());
 
-        // Step 4: Role-Specific Logic
+        // Step 5: Role-Specific Business Logic
         switch (dbRole) {
             case "TOURIST":
                 List<BookingDTO> myBookings = allBookings.stream()
@@ -84,25 +84,29 @@ public class DashboardServiceImpl implements DashboardService {
 
                 metrics.put("tripCompletionRate", calculatePercentage(doneB, totalB) + "%");
                 metrics.put("upcomingEvents", myBookings.stream().filter(b -> "CONFIRMED".equalsIgnoreCase(b.getStatus())).count());
+                unreadNotifications = unreadNotifications.stream()
+                        .filter(n -> userId.equals(n.getUserId()))
+                        .toList();
                 break;
 
             case "MANAGER":
             case "ADMIN":
-                // Additional fetch for Programs (Parallelized)
                 List<ProgramDTO> allPrograms = handleFetch(programClient::getAllPrograms, "Programs");
-                double totalBudget = allPrograms.stream().mapToDouble(p -> p.getBudget() != null ? p.getBudget() : 0.0).sum();
+                double totalBudget = allPrograms.stream()
+                        .mapToDouble(p -> p.getBudget() != null ? p.getBudget() : 0.0)
+                        .sum();
                 
                 metrics.put("totalUsers", handleFetch(userClient::getAllUsers, "Users").size());
-                metrics.put("totalEvents", allEvents.size()); // FIXED BUG: Previously used totalS
-                metrics.put("totalBookings", allBookings.size());
+                metrics.put("totalEvents", (long) allEvents.size()); 
+                metrics.put("totalBookings", (long) allBookings.size());
                 metrics.put("totalBudget", "₹" + totalBudget);
                 metrics.put("activePrograms", allPrograms.stream().filter(p -> "ACTIVE".equalsIgnoreCase(p.getStatus())).count());
                 break;
 
             case "OFFICER":
-                metrics.put("totalBookings", allBookings.size());
+                metrics.put("totalBookings", (long) allBookings.size());
                 metrics.put("pendingApprovals", allBookings.stream().filter(b -> "PENDING".equalsIgnoreCase(b.getStatus())).count());
-                metrics.put("docsToVerify", 0); 
+                metrics.put("docsToVerify", 0);
                 break;
 
             case "COMPLIANCE":
@@ -122,13 +126,17 @@ public class DashboardServiceImpl implements DashboardService {
                 .build();
     }
 
-    // Resilience Helper: Prevents the whole dashboard from crashing if one service is down
+    /**
+     * Resilience Helper: RESTORED with try-catch logic.
+     * Prevents the whole dashboard from crashing if one microservice fails.
+     */
     private <T> List<T> handleFetch(java.util.function.Supplier<List<T>> fetcher, String serviceName) {
         try {
             return fetcher.get();
         } catch (Exception e) {
-            log.error("DASHBOARD ERROR: Failed to fetch {} - {}", serviceName, e.getMessage());
-            return Collections.emptyList();
+            log.error("DASHBOARD PARTIAL FAILURE: {} service is currently unavailable or returned an error. Details: {}", 
+                      serviceName, e.getMessage());
+            return Collections.emptyList(); // Graceful degradation
         }
     }
 

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.tourismgov.tourist.dto.DocumentUploadRequest;
 import com.tourismgov.tourist.dto.DocumentVerifyRequest;
 import com.tourismgov.tourist.dto.TouristDocumentResponse;
+import com.tourismgov.tourist.security.SecurityUtils;
 import com.tourismgov.tourist.service.TouristDocumentService;
 
 import jakarta.validation.Valid;
@@ -28,12 +29,15 @@ import lombok.extern.slf4j.Slf4j;
 public class TouristDocumentController {
 
 	private final TouristDocumentService touristDocumentService;
+	private final SecurityUtils securityUtils;
 
 	// Upload Document
-	@PostMapping("/{touristId}/documents")
-	public ResponseEntity<TouristDocumentResponse> uploadDocument(@PathVariable Long touristId,
-			@ModelAttribute DocumentUploadRequest request) {
-		TouristDocumentResponse response = touristDocumentService.uploadDocument(touristId, request);
+	@PostMapping("/documents")
+	public ResponseEntity<TouristDocumentResponse> uploadDocument(@ModelAttribute DocumentUploadRequest request) {
+		Long userId = securityUtils.getCurrentUserId(); 
+		log.info("User {} is uploading a document", userId);
+		
+		TouristDocumentResponse response = touristDocumentService.uploadDocument(userId, request);
 		return ResponseEntity.status(HttpStatus.CREATED).body(response);
 	}
 
@@ -48,16 +52,18 @@ public class TouristDocumentController {
 	}
 
 	// View Document
-	@GetMapping("/{touristId}/documents/{documentId}/view")
-	public ResponseEntity<TouristDocumentResponse> viewDocument(@PathVariable Long touristId,
+	@GetMapping("/documents/{documentId}/view")
+	public ResponseEntity<TouristDocumentResponse> viewDocument(
 			@PathVariable Long documentId) {
-		TouristDocumentResponse response = touristDocumentService.getDocumentMetadata(touristId, documentId);
+		Long userId = securityUtils.getCurrentUserId();
+		TouristDocumentResponse response = touristDocumentService.getDocumentMetadata(userId, documentId);
 		return ResponseEntity.ok(response);
 	}
 
 	// Delete Document
 	@DeleteMapping("/{touristId}/documents/{documentId}")
-	public ResponseEntity<String> deleteDocument(@PathVariable Long touristId, @PathVariable Long documentId) {
+	public ResponseEntity<String> deleteDocument(@PathVariable Long touristId, 
+			@PathVariable Long documentId) {
 		touristDocumentService.deleteDocument(touristId, documentId);
 		return ResponseEntity.ok("Document deleted successfully");
 	}

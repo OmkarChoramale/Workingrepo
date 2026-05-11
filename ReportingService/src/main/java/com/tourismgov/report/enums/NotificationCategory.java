@@ -6,7 +6,8 @@ public enum NotificationCategory {
     SYSTEM_UPDATE,    // For Site/Event changes
     MANAGEMENT,       // For Managers (Budget alerts)
     COMPLIANCE,
-    ANNOUNCEMENT
+    ANNOUNCEMENT,
+    SYSTEM
   
 }
 

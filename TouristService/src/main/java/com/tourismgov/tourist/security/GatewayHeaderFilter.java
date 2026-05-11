@@ -3,7 +3,6 @@ package com.tourismgov.tourist.security;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -24,17 +23,6 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
 
     private static final String HEADER_USER_ID = "X-User-Id";
     private static final String HEADER_USER_ROLES = "X-User-Roles";
-    private static final String ROLE_PREFIX = "ROLE_";
-    
-    @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        
-        // Add any endpoints here that do not require Gateway Auth Headers
-        return path.contains("/tourismgov/v1/tourist/create")
-            || path.contains("/tourismgov/v1/tourist/internal/")
-            || path.contains("/internal/sync");
-    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -49,10 +37,12 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
                 
                 // Convert comma-separated roles into Spring Security Authorities
                 List<SimpleGrantedAuthority> authorities = Arrays.stream(rolesStr.split(","))
-                        .map(role -> new SimpleGrantedAuthority(
-                                role.startsWith(ROLE_PREFIX) ? role : ROLE_PREFIX + role.trim().toUpperCase()))
-                        .collect(Collectors.toList());
-
+                	    .map(role -> role.replaceAll("[\\[\\]\" ]", "")) // Remove [ ] " and spaces
+                	    .filter(role -> !role.isEmpty())
+                	    .map(role -> role.toUpperCase().startsWith("ROLE_") ? role.toUpperCase() : "ROLE_" + role.toUpperCase())
+                	    .map(SimpleGrantedAuthority::new)
+                	    .toList();
+                
                 UsernamePasswordAuthenticationToken authentication = 
                         new UsernamePasswordAuthenticationToken(userId, null, authorities);
                 

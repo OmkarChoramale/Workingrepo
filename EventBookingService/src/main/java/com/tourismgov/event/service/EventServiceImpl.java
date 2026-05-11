@@ -18,7 +18,6 @@ import com.tourismgov.event.dto.AuditLogRequest;
 import com.tourismgov.event.dto.CreateEventRequest;
 import com.tourismgov.event.dto.EventResponse;
 import com.tourismgov.event.dto.NotificationRequestDTO;
-import com.tourismgov.event.dto.EventResponse;
 import com.tourismgov.event.dto.ProgramDto;
 import com.tourismgov.event.dto.UpdateEventStatusRequest;
 import com.tourismgov.event.entity.Event;
@@ -63,52 +62,38 @@ public class EventServiceImpl implements EventService {
         log.info("Creating event: {}", request.getTitle());
         Long currentUserId = SecurityUtils.getCurrentUserId();
 
-        // 1. Check for Duplicate Event
         if (eventRepository.existsByTitleAndSiteIdAndDate(request.getTitle(), request.getSiteId(), request.getDate())) {
-            log.warn("Duplicate event creation attempt blocked for title: {}", request.getTitle());
             logAuditSafe(currentUserId, ACTION_EVENT_CREATE, RESOURCE_EVENT, STATUS_FAILED);
             throw new IllegalStateException("An event with this title is already scheduled at this site for the given date.");
         }
 
-        // 2. Validate Site and Program externally
         validateSiteAndProgram(request.getSiteId(), request.getProgramId(), request.getDate());
 
-        // 3. Save Event
         Event event = new Event();
         event.setSiteId(request.getSiteId()); 
         event.setTitle(request.getTitle());
         event.setLocation(request.getLocation());
         event.setDate(request.getDate());
-        
-        if (request.getStatus() != null) {
-            event.setStatus(request.getStatus());
-        } else {
-            event.setStatus(EventStatus.SCHEDULED);
-        }
-
-        if (request.getProgramId() != null) {
-            event.setProgramId(request.getProgramId());
-        }
+        event.setStatus(request.getStatus() != null ? request.getStatus() : EventStatus.SCHEDULED);
+        event.setProgramId(request.getProgramId());
 
         Event saved = eventRepository.save(event);
-        
-        // 4. Triggers
         logAuditSafe(currentUserId, ACTION_EVENT_CREATE, RESOURCE_EVENT, STATUS_SUCCESS);
                 
-        String message = String.format("A new event '%s' has been scheduled at %s on %s.", 
-                saved.getTitle(), saved.getLocation(), saved.getDate().toLocalDate());
-                
+        // ✅ Global Broadcast: New Event
         try {
-            NotificationRequestDTO broadcastReq = NotificationRequestDTO.builder()
+            String message = String.format("A new event '%s' has been scheduled at %s on %s.", 
+                    saved.getTitle(), saved.getLocation(), saved.getDate().toLocalDate());
+            
+            notificationClient.sendGlobalBroadcast(NotificationRequestDTO.builder()
                     .userId(currentUserId)
                     .entityId(saved.getEventId())
                     .subject("New Event Scheduled!")
                     .message(message)
                     .category("EVENT")
-                    .build();
-            notificationClient.sendGlobalBroadcast(broadcastReq);
+                    .build());
         } catch (Exception e) {
-            log.error("Failed to push global broadcast to NOTIFICATION-SERVICE: {}", e.getMessage());
+            log.error("Global broadcast failed during creation: {}", e.getMessage());
         }
 
         return mapToResponse(saved);
@@ -122,41 +107,37 @@ public class EventServiceImpl implements EventService {
         
         Long currentUserId = SecurityUtils.getCurrentUserId();
 
-        // 1. Prevent updating to a duplicate of ANOTHER event
         if (eventRepository.existsByTitleAndSiteIdAndDateAndEventIdNot(
                 request.getTitle(), request.getSiteId(), request.getDate(), eventId)) {
-            log.warn("Update blocked: Conflicts with an existing event title: {}", request.getTitle());
             logAuditSafe(currentUserId, ACTION_EVENT_UPDATE, RESOURCE_EVENT, STATUS_FAILED);
-            throw new IllegalStateException("Another event with this title is already scheduled at this site for the given date.");
+            throw new IllegalStateException("Another event title conflict on this date.");
         }
 
-        // 2. Check if the Site, Program, or Date actually changed before calling other microservices
-        boolean needsValidation = !event.getSiteId().equals(request.getSiteId()) || 
-                                  !event.getDate().equals(request.getDate()) ||
-                                  (request.getProgramId() != null && !request.getProgramId().equals(event.getProgramId()));
+        validateSiteAndProgram(request.getSiteId(), request.getProgramId(), request.getDate());
 
-        if (needsValidation) {
-            validateSiteAndProgram(request.getSiteId(), request.getProgramId(), request.getDate());
-        }
-
-        // 3. Update fields
         event.setTitle(request.getTitle());
         event.setLocation(request.getLocation());
         event.setDate(request.getDate());
         event.setSiteId(request.getSiteId()); 
+        event.setProgramId(request.getProgramId());
+        if (request.getStatus() != null) event.setStatus(request.getStatus());
 
-        if (request.getProgramId() != null) {
-            event.setProgramId(request.getProgramId());
-        }
-
-        if (request.getStatus() != null) {
-            event.setStatus(request.getStatus());
-        }
-        
         Event updatedEvent = eventRepository.save(event);
-        
-        // 4. Audit Log
         logAuditSafe(currentUserId, ACTION_EVENT_UPDATE, RESOURCE_EVENT, STATUS_SUCCESS);
+
+        // ✅ Global Broadcast: Updated Event
+        try {
+            String message = String.format("Event '%s' details have been updated.", updatedEvent.getTitle());
+            notificationClient.sendGlobalBroadcast(NotificationRequestDTO.builder()
+                    .userId(currentUserId)
+                    .entityId(updatedEvent.getEventId())
+                    .subject("Event Details Updated")
+                    .message(message)
+                    .category("EVENT")
+                    .build());
+        } catch (Exception e) {
+            log.warn("Global broadcast failed during update: {}", e.getMessage());
+        }
         
         return mapToResponse(updatedEvent);
     }
@@ -167,53 +148,30 @@ public class EventServiceImpl implements EventService {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException(ENTITY_NAME, eventId));
         
-        EventStatus oldStatus = event.getStatus();
-        
         if (request.getStatus() != null) {
             event.setStatus(EventStatus.valueOf(request.getStatus().toString())); 
         }
 
         Event updatedEvent = eventRepository.save(event);
-        Long currentUserId = SecurityUtils.getCurrentUserId();
+        logAuditSafe(SecurityUtils.getCurrentUserId(), ACTION_EVENT_STATUS_UPDATE, RESOURCE_EVENT, STATUS_SUCCESS);
         
-        logAuditSafe(currentUserId, ACTION_EVENT_STATUS_UPDATE, RESOURCE_EVENT, STATUS_SUCCESS);
-        
-        if (!oldStatus.equals(updatedEvent.getStatus())) {
-            String message = String.format("Alert: Event '%s' status changed to %s.", 
-                    event.getTitle(), updatedEvent.getStatus().name());
-                    
-            sendSystemAlertSafe(currentUserId, event.getEventId(), "Event Status Update", message, "ALERT");
-        }
+        // ❌ NOTIFICATION REMOVED AS PER REQUEST
         
         return mapToResponse(updatedEvent);
     }
-    
-    
 
     @Override
     @Transactional
     public void cancelEventsByProgram(Long programId) {
-        log.info(">>>> [EVENT-SERVICE] RECEIVED CANCELLATION REQUEST FOR PROGRAM ID: {}", programId);
-
-        // 1. Fetch events
+        log.info(">>>> [EVENT-SERVICE] Cancelling events for Program ID: {}", programId);
         List<Event> events = eventRepository.findByProgramId(programId);
 
-        // 2. CHECK: Is the list empty?
-        if (events == null || events.isEmpty()) {
-            log.error(">>>> [EVENT-SERVICE] FAILURE: No events found linked to Program ID: {}. Check your database 'program_id' column!", programId);
-            return;
-        }
+        if (events == null || events.isEmpty()) return;
 
-        log.info(">>>> [EVENT-SERVICE] SUCCESS: Found {} events. Updating status now...", events.size());
-
-        // 3. Update and Save
-        events.forEach(event -> {
-            log.info(">>>> [EVENT-SERVICE] Cancelling Event: {}", event.getTitle());
-            event.setStatus(EventStatus.CANCELLED);
-        });
-
+        events.forEach(event -> event.setStatus(EventStatus.CANCELLED));
         eventRepository.saveAll(events);
-        log.info(">>>> [EVENT-SERVICE] ALL EVENTS SUCCESSFULLY CANCELLED IN DATABASE.");
+
+        // ❌ NOTIFICATION REMOVED AS PER REQUEST
     }
     
     @Override
@@ -240,7 +198,6 @@ public class EventServiceImpl implements EventService {
     @Override
     public Page<EventResponse> getEventsPaged(String status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
-        
         if (status != null && !status.isBlank()) {
             try {
                 EventStatus statusEnum = EventStatus.valueOf(status.toUpperCase());
@@ -249,7 +206,6 @@ public class EventServiceImpl implements EventService {
                 throw new IllegalArgumentException(ErrorMessages.INVALID_STATUS);
             }
         }
-        
         return eventRepository.findAll(pageable).map(this::mapToResponse); 
     }
 
@@ -261,6 +217,7 @@ public class EventServiceImpl implements EventService {
         }
         eventRepository.deleteById(eventId);
         logAuditSafe(SecurityUtils.getCurrentUserId(), ACTION_EVENT_DELETE, RESOURCE_EVENT, STATUS_SUCCESS);
+        // ❌ NOTIFICATION REMOVED AS PER REQUEST
     }
 
     // --- Private Helper Methods ---
@@ -279,32 +236,34 @@ public class EventServiceImpl implements EventService {
         if (programId != null) {
             try {
                 ProgramDto program = programClient.getProgramById(programId);
-                
                 if (eventDate != null) {
                     LocalDate eDate = eventDate.toLocalDate();
                     if (eDate.isBefore(program.getStartDate()) || eDate.isAfter(program.getEndDate())) {
-                        throw new IllegalArgumentException(
-                            String.format(ErrorMessages.EVENT_DATE_OUT_OF_BOUNDS,
-                            eDate, program.getStartDate(), program.getEndDate())
-                        );
+                        throw new IllegalArgumentException(String.format(ErrorMessages.EVENT_DATE_OUT_OF_BOUNDS,
+                                eDate, program.getStartDate(), program.getEndDate()));
                     }
                 }
             } catch (FeignException.NotFound e) {
                 throw new ResourceNotFoundException(ENTITY_PROGRAM, programId);
             } catch (Exception e) {
-                if (e instanceof IllegalArgumentException) {
-                    throw e;
-                }
+                if (e instanceof IllegalArgumentException) throw e;
                 throw new RuntimeException(ErrorMessages.PROGRAM_SERVICE_ERROR, e);
             }
         }
     }
 
-    private void sendSystemAlertSafe(Long userId, Long entityId, String subject, String message, String category) {
+    private void sendNotificationSafe(Long userId, Long entityId, String subject, String message, String category) {
         try {
-            notificationClient.sendSystemAlert(userId, entityId, subject, message, category);
+            notificationClient.createNotification(NotificationRequestDTO.builder()
+                    .userId(userId) 
+                    .entityId(entityId)
+                    .subject(subject)
+                    .message(message)
+                    .category(category)
+                    .build());
+            log.info("Private notification sent to user: {}", userId);
         } catch (Exception e) {
-            log.error("Failed to push system alert to NOTIFICATION-SERVICE: {}", e.getMessage());
+            log.error("Failed to push notification: {}", e.getMessage());
         }
     }
 
@@ -316,29 +275,20 @@ public class EventServiceImpl implements EventService {
         response.setTitle(event.getTitle());
         response.setLocation(event.getLocation());
         response.setDate(event.getDate());
-        
-        if (event.getStatus() != null) {
-            response.setStatus(event.getStatus().name());
-        }
-        
+        if (event.getStatus() != null) response.setStatus(event.getStatus().name());
         return response;
     }
 
-    // --- Single, Correct Audit Log Helper ---
     private void logAuditSafe(Long userId, String action, String resource, String status) {
         try {
-            // Instantiate the DTO and set the 4 required fields
             AuditLogRequest auditRequest = new AuditLogRequest();
             auditRequest.setUserId(userId);
             auditRequest.setAction(action);
             auditRequest.setResource(resource);
             auditRequest.setStatus(status);
-            
-            // Push to the USER-SERVICE
             userClient.logAction(auditRequest);
-            
         } catch (Exception e) {
-            log.error("Failed to push audit log to USER-SERVICE: {}", e.getMessage());
+            log.error("Audit log push failed: {}", e.getMessage());
         }
     }
 }

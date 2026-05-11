@@ -2,16 +2,25 @@ package com.tourismgov.tourist.client;
 
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
+import com.tourismgov.tourist.dto.NotificationRequestDTO;
 
-@FeignClient(name = "NOTIFICATIONSERVICE")
+@FeignClient(name = "NOTIFICATION-SERVICE")
 public interface NotificationClient {
 
-    @PostMapping("/tourismgov/v1/notifications/system-alert")
-    void sendSystemAlert(
-            @RequestParam("userId") Long userId,
-            @RequestParam("entityId") Long entityId,
-            @RequestParam("subject") String subject,
-            @RequestParam("message") String message,
-            @RequestParam("category") String category);
+    /**
+     * PRIVATE MESSAGE: Hits @PostMapping in Controller
+     * URL: http://NOTIFICATION-SERVICE/tourismgov/v1/notifications
+     * Use this when only ONE specific user needs to be notified.
+     */
+    @PostMapping("/tourismgov/v1/notifications")
+    void createNotification(@RequestBody NotificationRequestDTO request);
+
+    /**
+     * GLOBAL NOTIFICATION: Hits @PostMapping("/broadcast") in Controller
+     * URL: http://NOTIFICATION-SERVICE/tourismgov/v1/notifications/broadcast
+     * Use this when EVERY user in the system should receive the message.
+     */
+    @PostMapping("/tourismgov/v1/notifications/broadcast")
+    void sendGlobalBroadcast(@RequestBody NotificationRequestDTO request);
 }

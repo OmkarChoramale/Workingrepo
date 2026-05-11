@@ -62,16 +62,20 @@ public class NotificationController {
     }
 
     // 5. PATCH mark ALL notifications as READ for the logged-in user
+
     @PatchMapping("/read-all")
-    public ResponseEntity<Void> markAllAsRead(
+    public ResponseEntity<String> markAllAsRead(
             @RequestHeader("X-User-Id") Long userId) {
+        
+        // Perform the service logic
         notificationService.markAllAsRead(userId);
-        return ResponseEntity.noContent().build();
+        
+        // Return a 200 OK with a descriptive message body
+        return ResponseEntity.ok("All notifications marked as read successfully for userId: " + userId);
     }
 
     // 6. POST create a direct targeted notification
-    //    userId in body = the RECIPIENT's ID
-    //    Called via Gateway with JWT (X-User-Id auto-injected for logging)
+   
     @PostMapping
     public ResponseEntity<NotificationResponseDTO> create(
             @Valid @RequestBody NotificationRequestDTO request) {
@@ -80,8 +84,7 @@ public class NotificationController {
     }
 
     // 7. POST broadcast to ALL users
-    //    userId in body = sender's ID (used internally for role check)
-    //    Called by: human users via Gateway OR other microservices via Feign
+  
     @PostMapping("/broadcast")
     public ResponseEntity<String> broadcast(
             @Valid @RequestBody NotificationRequestDTO request) {
@@ -89,34 +92,5 @@ public class NotificationController {
         return ResponseEntity.ok("Broadcast sent successfully to all users.");
     }
 
-    // 8. Internal system-alert: called by other microservices (SiteService, ReportService, etc.)
-    //    No JWT needed — trusted internal call via service discovery
-    @PostMapping("/system-alert")
-    public ResponseEntity<Void> sendSystemAlert(
-            @RequestParam("userId")   Long userId,
-            @RequestParam("entityId") Long entityId,
-            @RequestParam("subject")  String subject,
-            @RequestParam("message")  String message,
-            @RequestParam("category") String category) {
-
-        NotificationRequestDTO request = new NotificationRequestDTO();
-        request.setUserId(userId);
-        request.setEntityId(entityId);
-        request.setSubject(subject);
-        request.setMessage(message);
-        try {
-            request.setCategory(NotificationCategory.valueOf(category.toUpperCase()));
-        } catch (IllegalArgumentException e) {
-            request.setCategory(NotificationCategory.SYSTEM);
-        }
-        notificationService.create(request);
-        return ResponseEntity.status(HttpStatus.CREATED).build();
-    }
-
-    // 9. Internal: get unread count for a user — called by other services
-    @GetMapping("/internal/unread")
-    public ResponseEntity<List<NotificationResponseDTO>> getUnreadInternal(
-            @RequestParam("userId") Long userId) {
-        return ResponseEntity.ok(notificationService.getUnread(userId));
-    }
+   
 }

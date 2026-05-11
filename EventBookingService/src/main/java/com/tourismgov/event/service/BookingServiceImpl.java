@@ -15,6 +15,7 @@ import com.tourismgov.event.client.UserClient;
 import com.tourismgov.event.dto.AuditLogRequest;
 import com.tourismgov.event.dto.BookingRequest;
 import com.tourismgov.event.dto.BookingResponse;
+import com.tourismgov.event.dto.NotificationRequestDTO;
 import com.tourismgov.event.dto.TouristDTO;
 import com.tourismgov.event.dto.UpdateBookingStatusRequest;
 import com.tourismgov.event.entity.Booking;
@@ -103,8 +104,9 @@ public class BookingServiceImpl implements BookingService {
         // 6. External Triggers (Audit Log & Notification)
         logAuditSafe(currentUserId, ACTION_BOOKING_CREATE, RESOURCE_BOOKING, STATUS_SUCCESS);
         
+        // Send confirmation to the Tourist
         String message = "Your booking for " + event.getTitle() + " is confirmed!";
-        sendSystemAlertSafe(tourist.getUserId(), savedBooking.getBookingId(), "Booking Confirmed", message, "EVENT");
+        sendNotificationSafe(tourist.getUserId(), savedBooking.getBookingId(), "Booking Confirmed", message, "EVENT");
 
         return mapToResponse(savedBooking);
     }
@@ -131,10 +133,19 @@ public class BookingServiceImpl implements BookingService {
                     booking.getEvent().getTitle(), updatedBooking.getStatus().name());
 
             try {
+                // Fetch Tourist to get their userId for targeted notification
                 TouristDTO tourist = touristClient.getTouristById(booking.getTouristId());
-                sendSystemAlertSafe(tourist.getUserId(), booking.getBookingId(), "Booking Status Update", message, "BOOKING");
+                
+                // Send targeted notification to the Tourist
+                sendNotificationSafe(
+                    tourist.getUserId(),      // Recipient User ID
+                    booking.getBookingId(),   // Entity ID (Booking ID)
+                    "Booking Status Update",  // Subject
+                    message,                  // Message
+                    "BOOKING"                 // Category
+                );
             } catch (Exception e) {
-                log.warn("Could not send notification. Tourist mapping failed.");
+                log.warn("Could not send notification. Tourist mapping failed for Tourist ID: {}", booking.getTouristId());
             }
         }
         
@@ -189,7 +200,6 @@ public class BookingServiceImpl implements BookingService {
 
     private void logAuditSafe(Long userId, String action, String resource, String status) {
         try {
-            // ✅ Safely instantiating using Setters. No timestamp needed!
             AuditLogRequest auditRequest = new AuditLogRequest();
             auditRequest.setUserId(userId);
             auditRequest.setAction(action);
@@ -198,15 +208,30 @@ public class BookingServiceImpl implements BookingService {
             
             userClient.logAction(auditRequest);
         } catch (Exception e) {
-            log.error("Failed to push audit log to USER-SERVICE", e);
+            log.error("Failed to push audit log to USER-SERVICE for user: {}", userId);
         }
     }
 
-    private void sendSystemAlertSafe(Long userId, Long entityId, String subject, String message, String category) {
+    /**
+     * Sends a targeted (private) notification to a specific user.
+     */
+    private void sendNotificationSafe(Long userId, Long entityId, String subject, String message, String category) {
         try {
-            notificationClient.sendSystemAlert(userId, entityId, subject, message, category);
+            NotificationRequestDTO notificationReq = NotificationRequestDTO.builder()
+                    .userId(userId)        // The RECIPIENT's login account ID
+                    .entityId(entityId)    // The ID of the related Booking
+                    .subject(subject)
+                    .message(message)
+                    .category(category)
+                    .build();
+
+            // Calls the targeted 'create' endpoint in the NOTIFICATION-SERVICE
+            notificationClient.createNotification(notificationReq);
+            
+            log.info("Private notification successfully sent to userId: {}", userId);
         } catch (Exception e) {
-            log.error("Failed to push system alert", e);
+            // Fault-tolerance: Service remains functional even if notification fails
+            log.error("Failed to push notification to NOTIFICATION-SERVICE: {}", e.getMessage());
         }
     }
 

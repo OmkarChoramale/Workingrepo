@@ -10,19 +10,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.tourismgov.tourist.client.UserClient;
 import com.tourismgov.tourist.client.NotificationClient;
+import com.tourismgov.tourist.client.UserClient;
 import com.tourismgov.tourist.dto.TouristRequest;
 import com.tourismgov.tourist.dto.TouristResponse;
 import com.tourismgov.tourist.dto.TouristSummaryResponse;
 import com.tourismgov.tourist.dto.TouristUpdateRequest;
-import com.tourismgov.tourist.dto.TouristSyncRequest;
+import com.tourismgov.tourist.dto.NotificationRequestDTO; // ✅ Added
 import com.tourismgov.tourist.dto.UserDTO;
 import com.tourismgov.tourist.enums.Status;
 import com.tourismgov.tourist.exception.TouristErrorMessage;
 import com.tourismgov.tourist.mapper.TouristMapper;
 import com.tourismgov.tourist.model.Tourist;
 import com.tourismgov.tourist.repository.TouristRepository;
+import com.tourismgov.tourist.security.SecurityUtils;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,135 +33,126 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TouristServiceImpl implements TouristService {
 
-	private final TouristRepository touristRepository;
-	private final TouristMapper touristMapper;
-	private final UserClient userClient;
-	private final NotificationClient notificationClient;
+    private final TouristRepository touristRepository;
+    private final TouristMapper touristMapper;
+    private final UserClient userClient;
+    private final SecurityUtils securityUtils;
+    private final NotificationClient notificationClient;
 
-	@Override
-	@Transactional
-	public TouristResponse createTourist(TouristRequest request) {
-	    log.info("Starting Dual Registration for: {}", request.getEmail());
+    @Override
+    @Transactional
+    public TouristResponse createTourist(TouristRequest request) {
+        log.info("Starting Dual Registration for: {}", request.getEmail());
 
-	    // 1. Convert Request to UserDTO
-	    UserDTO newUserRequest = touristMapper.toUserDTO(request);
+        Tourist tourist = touristMapper.toTouristEntity(request, null);
+        validateAdult(tourist);
 
-	    // 2. Call User Service to create the record
-	    UserDTO savedUser;
-	    try {
-	        // This call performs the INSERT into the user table
-	        savedUser = userClient.registerUser(newUserRequest);
-	        log.info("User created successfully with ID: {}", savedUser.getUserId());
-	    } catch (Exception e) {
-	        log.error("User Service registration failed: {}", e.getMessage());
-	        // If User Service returns 409 Conflict or 400, we pass it along
-	        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "User registration failed. Email might already exist.");
-	    }
+        UserDTO newUserRequest = touristMapper.toUserDTO(request);
+        UserDTO savedUser = userClient.registerUser(newUserRequest);
 
-	    // 3. Use the ID from savedUser to create the Tourist locally
-	    Tourist tourist = touristMapper.toTouristEntity(request, savedUser.getUserId());
-	    validateAdult(tourist);
-	    
-	    Tourist savedTourist = touristRepository.save(tourist);
-	    
-	    // Send private welcome notification
-	    try {
-	        notificationClient.sendSystemAlert(
-	                savedUser.getUserId(), 
-	                savedTourist.getTouristId(), 
-	                "Welcome to TourismGov!", 
-	                "Your registration was successful. Welcome aboard, " + savedUser.getName() + "!", 
-	                "SYSTEM");
-	    } catch (Exception e) {
-	        log.error("Failed to send welcome notification: {}", e.getMessage());
-	    }
-	    
-	    return touristMapper.toResponse(savedTourist);
-	}
+        if (savedUser != null && savedUser.getUserId() != null && savedUser.getUserId() == -1L) {
+            log.error("Aborting Tourist creation because USER-SERVICE is down.");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Registration service is temporarily down. Please try again later.");
+        }
 
-	@Override
-	public TouristResponse getTouristById(Long touristId) {
-		log.info("Fetching tourist with ID: {}", touristId);
-		Tourist tourist = findTouristByIdOrThrow(touristId);
-		
-		// Security validation removed
-		
-		log.info("Tourist {} fetched successfully", touristId);
-		return touristMapper.toResponse(tourist);
-	}
+        log.info("User created successfully with ID: {}", savedUser.getUserId());
 
-	@Override
-	@Transactional
-	public TouristResponse updateTourist(Long touristId, TouristUpdateRequest request) {
-		log.info("Updating tourist profile for ID: {}", touristId);
-		Tourist tourist = findTouristByIdOrThrow(touristId);
-		
-		// Security validation removed
-		
-		touristMapper.updateEntityFromRequest(request, tourist);
-		validateAdult(tourist);
+        tourist.setUserId(savedUser.getUserId()); 
+        
+        Tourist savedTourist = touristRepository.save(tourist);
 
-		tourist = touristRepository.save(tourist);
-		log.info("Tourist ID {} updated successfully", touristId);
+        // ✅ Notification: Send targeted welcome notification after successful save
+        String message = "Your registration was successful. Welcome aboard, " + savedUser.getName() + "!";
+        sendNotificationSafe(
+            savedUser.getUserId(),    // Recipient ID from User Service
+            savedTourist.getTouristId(), // Reference Entity ID
+            "Welcome to TourismGov!", 
+            message, 
+            "SYSTEM_CREATE"
+        );
 
-		return touristMapper.toResponse(tourist);
-	}
+        return touristMapper.toResponse(savedTourist);
+    }
 
-	@Override
-	@Transactional
-	public void deleteTourist(Long touristId) {
-		log.info("Attempting to delete tourist with ID: {}", touristId);
+    @Override
+    public TouristResponse getTouristById(Long userId) {
+        log.info("Fetching tourist profile for user ID: {}", userId);
+        Tourist tourist = findTouristByUserIdOrThrow(userId);
+        securityUtils.validateAccess(tourist.getUserId());
+        
+        log.info("Tourist {} fetched successfully", userId);
+        return touristMapper.toResponse(tourist);
+    }
 
-		Tourist tourist = findTouristByIdOrThrow(touristId);
-		
-		// Security validation removed
+    @Override
+    @Transactional
+    public TouristResponse updateTourist(Long userId, TouristUpdateRequest request) {
+        log.info("Updating tourist profile for user ID: {}", userId);
+        Tourist tourist = findTouristByUserIdOrThrow(userId);
+        securityUtils.validateAccess(tourist.getUserId());
+        
+        touristMapper.updateEntityFromRequest(request, tourist);
+        validateAdult(tourist);
 
-		touristRepository.delete(tourist);
-		log.info("Tourist {} deleted successfully", touristId);
-	}
+        tourist = touristRepository.save(tourist);
+        log.info("Tourist ID {} updated successfully", userId);
 
-	@Override
-	public Page<TouristSummaryResponse> getTouristSummariesByStatus(Status status, Pageable pageable) {
-		Page<Tourist> page = (status != null) ? touristRepository.findByStatus(status, pageable)
-				: touristRepository.findAll(pageable);
-		log.info("Fetched {} tourist records", page.getTotalElements());
-		return page.map(t -> new TouristSummaryResponse(t.getTouristId(), t.getName(), t.getStatus()));
-	}
+        return touristMapper.toResponse(tourist);
+    }
 
-	@Override
-	@Transactional
-	public void syncTouristProfile(TouristSyncRequest request) {
-	    log.info("Internal Sync: Creating tourist profile for user ID {}", request.getUserId());
-	    
-	    if (touristRepository.findById(request.getUserId()).isPresent()) {
-	        log.info("Tourist profile already exists for user ID {}. Skipping sync.", request.getUserId());
-	        return;
-	    }
-	    
-	    Tourist tourist = new Tourist();
-	    tourist.setTouristId(request.getUserId()); // Use same ID as User
-	    tourist.setUserId(request.getUserId());
-	    tourist.setName(request.getName());
-	    tourist.setContactInfo(request.getContactInfo());
-	    tourist.setStatus(Status.ACTIVE);
-	    // DOB, Gender, Address will remain null and can be updated later
-	    
-	    touristRepository.save(tourist);
-	    log.info("Internal Sync: Tourist profile saved for user ID {}", request.getUserId());
-	}
+    @Override
+    @Transactional
+    public void deleteTourist(Long touristId) {
+        log.info("Attempting to delete tourist profile for user ID: {}", touristId);
+        Tourist tourist = touristRepository.findById(touristId).orElseThrow(() -> {
+            log.error("Tourist {} not found", touristId);
+            return new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    String.format(TouristErrorMessage.ERROR_TOURIST_NOT_FOUND, touristId));
+        });
 
-	private Tourist findTouristByIdOrThrow(Long touristId) {
-		return touristRepository.findById(touristId).orElseThrow(() -> {
-			log.error("Tourist {} not found", touristId);
-			return new ResponseStatusException(HttpStatus.NOT_FOUND,
-					String.format(TouristErrorMessage.ERROR_TOURIST_NOT_FOUND, touristId));
-		});
-	}
+        touristRepository.delete(tourist);
+        log.info("Tourist {} deleted successfully", touristId);
+    }
 
-	private void validateAdult(Tourist tourist) {
-		if (tourist.getDob() != null && Period.between(tourist.getDob(), LocalDate.now()).getYears() < 18) {
-			log.error("Tourist {} is under 18 years old", tourist.getName());
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, TouristErrorMessage.ERROR_UNDERAGE_TOURIST);
-		}
-	}
+    @Override
+    public Page<TouristSummaryResponse> getTouristSummariesByStatus(Status status, Pageable pageable) {
+        securityUtils.validateAdminOrStaff();
+        Page<Tourist> page = (status != null) ? touristRepository.findByStatus(status, pageable)
+                : touristRepository.findAll(pageable);
+        log.info("Fetched {} tourist records", page.getTotalElements());
+        return page.map(t -> new TouristSummaryResponse(t.getTouristId(), t.getName(), t.getStatus()));
+    }
+
+    private Tourist findTouristByUserIdOrThrow(Long userId) {
+        return touristRepository.findByUserId(userId).orElseThrow(() -> {
+            log.error("Tourist profile not found for user ID: {}", userId);
+            return new ResponseStatusException(HttpStatus.NOT_FOUND, "No tourist profile found for the current user");
+        });
+    }
+
+    private void validateAdult(Tourist tourist) {
+        if (tourist.getDob() != null && Period.between(tourist.getDob(), LocalDate.now()).getYears() < 18) {
+            log.error("Tourist {} is under 18 years old", tourist.getName());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, TouristErrorMessage.ERROR_UNDERAGE_TOURIST);
+        }
+    }
+
+    // ✅ ADDED: Private Helper Method for DTO-based Private Notification
+    private void sendNotificationSafe(Long userId, Long entityId, String subject, String message, String category) {
+        try {
+            NotificationRequestDTO notificationReq = NotificationRequestDTO.builder()
+                    .userId(userId)        // The user receiving the notification
+                    .entityId(entityId)    // ID of the related Tourist record
+                    .subject(subject)
+                    .message(message)
+                    .category(category)
+                    .build();
+
+            notificationClient.createNotification(notificationReq);
+            log.info("Welcome notification sent successfully to userId: {}", userId);
+        } catch (Exception e) {
+            // Fault-tolerance: Registration succeeds even if the notification fails
+            log.error("Failed to push welcome notification: {}", e.getMessage());
+        }
+    }
 }

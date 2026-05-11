@@ -5,8 +5,10 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.tourismgov.site.client.NotificationClient; // ✅ ADDED IMPORT
 import com.tourismgov.site.client.UserClient;
 import com.tourismgov.site.dto.AuditLogRequest;
+import com.tourismgov.site.dto.NotificationRequestDTO; // ✅ ADDED IMPORT
 import com.tourismgov.site.dto.PreservationActivityRequest;
 import com.tourismgov.site.dto.PreservationActivityResponse;
 import com.tourismgov.site.entity.HeritageSite;
@@ -42,6 +44,7 @@ public class PreservationActivityServiceImpl implements PreservationActivityServ
     private final PreservationActivityRepository activityRepository;
     private final HeritageSiteRepository siteRepository;
     private final UserClient userClient;
+    private final NotificationClient notificationClient; // ✅ ADDED DEPENDENCY
 
     @Override
     @Transactional
@@ -98,8 +101,24 @@ public class PreservationActivityServiceImpl implements PreservationActivityServ
         // Cross-service audit logging using the helper method
         logAuditSafe(currentUserId, ACTION_LOG, MODULE_NAME, STATUS_SUCCESS);
 
+        // ✅ ADDED: Global Broadcast for logging new activity
+        try {
+            String msg = String.format("Maintenance Update: A new preservation activity has been logged for %s.", site.getName());
+            
+            notificationClient.sendGlobalBroadcast(NotificationRequestDTO.builder()
+                    .userId(currentUserId) // Sender ID for role check
+                    .entityId(saved.getActivityId())
+                    .subject("New Preservation Work Logged")
+                    .message(msg)
+                    .category("SYSTEM_CREATE")
+                    .build());
+        } catch (Exception e) {
+            log.error("Global broadcast failed during activity log: {}", e.getMessage());
+        }
+
         return mapToActivityResponse(saved);
     }
+
     @Override
     @Transactional
     public PreservationActivityResponse updateActivityStatus(Long activityId, String status) {

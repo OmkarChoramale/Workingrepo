@@ -26,24 +26,21 @@ public interface TouristService {
     /**
      * Retrieves a tourist record by its unique identifier.
      *
-     * @param touristId the ID of the tourist to retrieve
      * @return the tourist information as a response DTO
      */
-    public TouristResponse getTouristById(Long touristId);
+    public TouristResponse getTouristById(Long userId);
 
     /**
      * Updates an existing tourist record with new details.
      *
-     * @param touristId the ID of the tourist to update
      * @param request   the updated tourist details
      * @return the updated tourist information as a response DTO
      */
-    public TouristResponse updateTourist(Long touristId, TouristUpdateRequest request);
+    public TouristResponse updateTourist(Long userId,TouristUpdateRequest request);
 
     /**
      * Deletes a tourist record by its unique identifier.
      *
-     * @param touristId the ID of the tourist to delete
      */
     public void deleteTourist(Long touristId);
 
@@ -55,10 +52,5 @@ public interface TouristService {
      * @return a page of tourist summary response DTOs
      */
     public Page<TouristSummaryResponse> getTouristSummariesByStatus(Status status, Pageable pageable);
-
-    /**
-     * Internal method to synchronize a tourist profile from the User Service.
-     */
-    public void syncTouristProfile(com.tourismgov.tourist.dto.TouristSyncRequest request);
 
 }

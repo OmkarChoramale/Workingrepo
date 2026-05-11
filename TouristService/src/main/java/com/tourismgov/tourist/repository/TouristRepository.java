@@ -15,4 +15,6 @@ public interface TouristRepository extends JpaRepository<Tourist, Long> {
 	Optional<Tourist> findByContactInfo(String contactInfo);
 	Page<Tourist> findAll(Pageable pageable);
 	Page<Tourist> findByStatus(Status status, Pageable pageable);
+	
+	Optional<Tourist> findByUserId(Long userId);
 }

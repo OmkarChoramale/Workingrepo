@@ -1,23 +1,72 @@
 package com.tourismgov.tourist.security;
 
+import java.util.stream.Collectors;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
-
-public final class SecurityUtils {
+@Component
+public class SecurityUtils {
 
     private static final String ANONYMOUS_USER = "anonymousUser";
 
-    private SecurityUtils() {
-        throw new IllegalStateException("Utility class cannot be instantiated");
+    public void validateAccess(Long targetUserId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+
+        var roles = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+
+        // Staff bypass ID matching
+        if (roles.contains("ROLE_ADMIN") || roles.contains("ROLE_OFFICER") || 
+            roles.contains("ROLE_MANAGER") || roles.contains("ROLE_AUDITOR")) {
+            return; 
+        }
+
+        // Tourists must match their own ID
+        if (roles.contains("ROLE_TOURIST")) {
+            // FIX: Use your helper method to get the actual Long ID!
+            Long loggedInUserId = this.getCurrentUserId(); 
+            
+            if (!loggedInUserId.equals(targetUserId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access Denied: ID Mismatch");
+            }
+        } else {
+            // TIP: If you still get 403 here, it means your JWT role is missing the "ROLE_" prefix.
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Insufficient permissions");
+        }
     }
 
+    public void validateAdminOrStaff() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+
+        var roles = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+
+        boolean isStaff = roles.contains("ROLE_ADMIN") || roles.contains("ROLE_OFFICER") || 
+                         roles.contains("ROLE_MANAGER") || roles.contains("ROLE_AUDITOR");
+
+        if (!isStaff) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only staff can perform this action.");
+        }
+    }
+    
     /**
      * Extracts the User ID passed down from the API Gateway header filter.
      * @return Long representing the current user ID
      */
-    public static Long getCurrentUserId() {
+    public Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         // 1. Check if the user is actually authenticated

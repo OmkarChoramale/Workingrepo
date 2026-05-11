@@ -1,21 +1,23 @@
 package com.tourismgov.program.client;
 
+
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
+import com.tourismgov.program.dto.NotificationRequestDTO;
 
-@FeignClient(name = "NOTIFICATIONSERVICE")
+@FeignClient(name = "NOTIFICATION-SERVICE")
 public interface NotificationClient {
 
     /**
-     * Sends a system alert notification to users or administrators.
+     * PRIVATE MESSAGE: Fixed URL path to include /v1
      */
-    @PostMapping("/tourismgov/v1/notifications/system-alert")
-    void sendSystemAlert(
-            @RequestParam("userId") Long userId,
-            @RequestParam("entityId") Long entityId,
-            @RequestParam("subject") String subject,
-            @RequestParam("message") String message,
-            @RequestParam("category") String category
-    );
+    @PostMapping("/tourismgov/v1/notifications") // ✅ Added /v1
+    void createNotification(@RequestBody NotificationRequestDTO request);
+
+    /**
+     * GLOBAL NOTIFICATION: Fixed URL path to include /v1
+     */
+    @PostMapping("/tourismgov/v1/notifications/broadcast") // ✅ Added /v1
+    void sendGlobalBroadcast(@RequestBody NotificationRequestDTO request);
 }

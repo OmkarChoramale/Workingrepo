@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.tourismgov.program.client.NotificationClient;
 import com.tourismgov.program.client.UserClient;
 import com.tourismgov.program.dto.AuditLogRequest;
+import com.tourismgov.program.dto.NotificationRequestDTO; // ✅ Ensure this is imported
 import com.tourismgov.program.dto.ProgramRequest;
 import com.tourismgov.program.dto.ProgramResponse;
 import com.tourismgov.program.dto.ResourceResponse;
@@ -64,23 +65,65 @@ public class TourismProgramServiceImpl implements TourismProgramService {
         program.setStatus(ProgramStatus.PLANNED);
 
         TourismProgram saved = programRepository.save(program);
-        
         logAuditSafe(currentUserId, "CREATE_PROGRAM", MODULE_NAME, STATUS_SUCCESS);
 
+        // ✅ REFACTORED: Send Global Broadcast for New Program
         try {
             String message = String.format("Tourism program '%s' has been officially initiated.", saved.getTitle());
-            notificationClient.sendSystemAlert(
-                    currentUserId, 
-                    saved.getProgramId(), 
-                    "New Program Launched!", 
-                    message, 
-                    "SYSTEM"
-            );
+            
+            notificationClient.sendGlobalBroadcast(NotificationRequestDTO.builder()
+                    .userId(currentUserId) // Sender ID
+                    .entityId(saved.getProgramId())
+                    .subject("New Program Launched!")
+                    .message(message)
+                    .category("PROGRAM")
+                    .build());
         } catch (Exception e) {
-            log.error("Failed to send creation notification: {}", e.getMessage());
+            log.error("Failed to send global creation notification: {}", e.getMessage());
         }
 
         return mapToProgramResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public ProgramResponse updateProgram(Long programId, ProgramRequest request) {
+        log.info("Updating Tourism Program ID: {}", programId);
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        
+        TourismProgram program = programRepository.findById(programId)
+                .orElseThrow(() -> {
+                    logAuditSafe(currentUserId, "UPDATE_PROGRAM", MODULE_NAME, STATUS_FAILED);
+                    return new ResourceNotFoundException(ENTITY_NAME, programId);
+                });
+
+        try {
+            validateProgramDates(request.getStartDate(), request.getEndDate(), false);
+        } catch (IllegalArgumentException e) {
+            logAuditSafe(currentUserId, "UPDATE_PROGRAM", MODULE_NAME, STATUS_FAILED);
+            throw e;
+        }
+
+        mapRequestToEntity(request, program);
+        TourismProgram updated = programRepository.save(program);
+        logAuditSafe(currentUserId, "UPDATE_PROGRAM", MODULE_NAME, STATUS_SUCCESS);
+
+        // ✅ NEW: Send Global Broadcast for Program Update
+        try {
+            String message = String.format("The details for tourism program '%s' have been updated.", updated.getTitle());
+            
+            notificationClient.sendGlobalBroadcast(NotificationRequestDTO.builder()
+                    .userId(currentUserId) // Sender ID
+                    .entityId(updated.getProgramId())
+                    .subject("Tourism Program Updated")
+                    .message(message)
+                    .category("PROGRAM")
+                    .build());
+        } catch (Exception e) {
+            log.warn("Failed to send global update notification: {}", e.getMessage());
+        }
+
+        return mapToProgramResponse(updated);
     }
 
     @Override
@@ -104,13 +147,47 @@ public class TourismProgramServiceImpl implements TourismProgramService {
         TourismProgram updated = programRepository.save(p);
         logAuditSafe(currentUserId, "UPDATE_STATUS", MODULE_NAME, STATUS_SUCCESS);
         
+        // ❌ NO NOTIFICATION here as per request
         return mapToProgramResponse(updated);
     }
 
     @Override
-    public Map<String, Object> getBudgetReport(Long programId) {
-        log.info("Generating budget report for Program ID: {}", programId);
+    @Transactional
+    public void deleteProgram(Long programId) {
+        log.info("Cancelling Program ID: {} and its associated resources", programId);
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+
+        TourismProgram program = programRepository.findById(programId)
+                .orElseThrow(() -> {
+                    logAuditSafe(currentUserId, "DELETE_PROGRAM", MODULE_NAME, STATUS_FAILED);
+                    return new ResourceNotFoundException(ENTITY_NAME, programId);
+                });
         
+        List<Resource> resources = resourceRepository.findByProgram_ProgramId(programId);
+
+        boolean resourcesUpdated = false;
+        for (Resource resource : resources) {
+            if (resource.getStatus() != ResourceStatus.RELEASED) {
+                resource.setStatus(ResourceStatus.CANCELLED);
+                resourcesUpdated = true;
+            }
+        }
+        
+        if (resourcesUpdated) {
+            resourceRepository.saveAll(resources);
+        }
+
+        program.setStatus(ProgramStatus.CANCELLED);
+        programRepository.save(program);
+        logAuditSafe(currentUserId, "DELETE_PROGRAM", MODULE_NAME, STATUS_SUCCESS);
+        
+        // ❌ NO NOTIFICATION here as per request
+    }
+
+    // --- READ METHODS (No Notifications) ---
+
+    @Override
+    public Map<String, Object> getBudgetReport(Long programId) {
         TourismProgram program = programRepository.findById(programId)
                 .orElseThrow(() -> new ResourceNotFoundException(ENTITY_NAME, programId));
 
@@ -130,67 +207,6 @@ public class TourismProgramServiceImpl implements TourismProgramService {
         report.put("currentStatus", program.getStatus()); 
         
         return report;
-    }
-
-    @Override 
-    @Transactional
-    public ProgramResponse updateProgram(Long programId, ProgramRequest request) {
-        Long currentUserId = SecurityUtils.getCurrentUserId();
-        TourismProgram program = programRepository.findById(programId)
-                .orElseThrow(() -> {
-                    logAuditSafe(currentUserId, "UPDATE_PROGRAM", MODULE_NAME, STATUS_FAILED);
-                    return new ResourceNotFoundException(ENTITY_NAME, programId);
-                });
-
-        try {
-            validateProgramDates(request.getStartDate(), request.getEndDate(), false);
-        } catch (IllegalArgumentException e) {
-            logAuditSafe(currentUserId, "UPDATE_PROGRAM", MODULE_NAME, STATUS_FAILED);
-            throw e;
-        }
-
-        mapRequestToEntity(request, program);
-        
-        TourismProgram updated = programRepository.save(program);
-        logAuditSafe(currentUserId, "UPDATE_PROGRAM", MODULE_NAME, STATUS_SUCCESS);
-        return mapToProgramResponse(updated);
-    }
-
-    @Override 
-    @Transactional
-    public void deleteProgram(Long programId) {
-        log.info("Cancelling Program ID: {} and its associated resources", programId);
-        Long currentUserId = SecurityUtils.getCurrentUserId();
-
-        // 1. Fetch the Program
-        TourismProgram program = programRepository.findById(programId)
-                .orElseThrow(() -> {
-                    logAuditSafe(currentUserId, "DELETE_PROGRAM", MODULE_NAME, STATUS_FAILED);
-                    return new ResourceNotFoundException(ENTITY_NAME, programId);
-                });
-        
-        // 2. Fetch all Resources linked to this Program
-        List<Resource> resources = resourceRepository.findByProgram_ProgramId(programId);
-
-        // 3. Update Resource Statuses (Skip if already RELEASED)
-        boolean resourcesUpdated = false;
-        for (Resource resource : resources) {
-            if (resource.getStatus() != ResourceStatus.RELEASED) {
-                resource.setStatus(ResourceStatus.CANCELLED);
-                resourcesUpdated = true;
-            }
-        }
-        
-        // 4. Save resources if any were changed
-        if (resourcesUpdated) {
-            resourceRepository.saveAll(resources);
-            log.info("Successfully cancelled eligible resources for Program ID: {}", programId);
-        }
-
-        // 5. Soft-delete the Program
-        program.setStatus(ProgramStatus.CANCELLED);
-        programRepository.save(program);
-        logAuditSafe(currentUserId, "DELETE_PROGRAM", MODULE_NAME, STATUS_SUCCESS);
     }
 
     @Override 
@@ -232,7 +248,6 @@ public class TourismProgramServiceImpl implements TourismProgramService {
         entity.setBudget(request.getBudget());
     }
 
-    // ✅ UPDATED: Now fetches resources and attaches them to the response
     private ProgramResponse mapToProgramResponse(TourismProgram program) {
         ProgramResponse res = new ProgramResponse();
         res.setProgramId(program.getProgramId());
@@ -243,29 +258,35 @@ public class TourismProgramServiceImpl implements TourismProgramService {
         res.setBudget(program.getBudget());
         res.setStatus(program.getStatus() != null ? program.getStatus().name() : null);
         
-        // Fetch resources for this program and map them
         List<Resource> resources = resourceRepository.findByProgram_ProgramId(program.getProgramId());
-        List<ResourceResponse> resourceResponses = resources.stream()
-                .map(this::mapToResourceResponse)
-                .toList();
-        
-        // Attach resources to the response
-        res.setResources(resourceResponses);
+        res.setResources(resources.stream().map(this::mapToResourceResponse).toList());
         
         return res;
     }
 
-    // ✅ NEW: Helper method to map individual Resources
     private ResourceResponse mapToResourceResponse(Resource resource) {
         ResourceResponse res = new ResourceResponse();
         res.setResourceId(resource.getResourceId());
-        if (resource.getProgram() != null) {
-            res.setProgramId(resource.getProgram().getProgramId());
-        }
+        if (resource.getProgram() != null) res.setProgramId(resource.getProgram().getProgramId());
         res.setType(resource.getType());
         res.setQuantity(resource.getQuantity());
         res.setStatus(resource.getStatus());
         return res;
+    }
+
+    // ✅ Helper method for targeted (private) alerts if needed later
+    private void sendNotificationSafe(Long userId, Long entityId, String subject, String message, String category) {
+        try {
+            notificationClient.createNotification(NotificationRequestDTO.builder()
+                    .userId(userId) 
+                    .entityId(entityId)
+                    .subject(subject)
+                    .message(message)
+                    .category(category)
+                    .build());
+        } catch (Exception e) {
+            log.error("Failed to push targeted notification: {}", e.getMessage());
+        }
     }
 
     private void logAuditSafe(Long userId, String action, String resource, String status) {

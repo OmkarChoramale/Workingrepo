@@ -18,11 +18,10 @@ public interface TouristDocumentService {
      * - Typically used for identity verification, travel permits, or supporting documents.
      * </p>
      *
-     * @param touristId the ID of the tourist to associate the document with
      * @param request   the document upload request containing file details and metadata
      * @return the uploaded document details as a response DTO
      */
-    public TouristDocumentResponse uploadDocument(Long touristId, DocumentUploadRequest request);
+    public TouristDocumentResponse uploadDocument(Long userId,DocumentUploadRequest request);
 
     /**
      * Verifies a specific document belonging to a tourist.
@@ -44,12 +43,11 @@ public interface TouristDocumentService {
      * <p>
      * Metadata includes document type, status, upload date, and verification details.
      * </p>
-     *
-     * @param touristId  the ID of the tourist who owns the document
+     
      * @param documentId the ID of the document to fetch metadata for
      * @return the document metadata as a response DTO
      */
-    public TouristDocumentResponse getDocumentMetadata(Long touristId, Long documentId);
+    public TouristDocumentResponse getDocumentMetadata(Long userId,Long documentId);
 
     /**
      * Deletes a specific document belonging to a tourist.
@@ -59,8 +57,7 @@ public interface TouristDocumentService {
      * - May affect tourist status if the document was required for verification.
      * </p>
      *
-     * @param touristId  the ID of the tourist who owns the document
      * @param documentId the ID of the document to delete
      */
-    public void deleteDocument(Long touristId, Long documentId);
+    public void deleteDocument(Long touristId,Long documentId);
 }

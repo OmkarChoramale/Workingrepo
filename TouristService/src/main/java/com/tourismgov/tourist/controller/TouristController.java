@@ -18,8 +18,8 @@ import com.tourismgov.tourist.dto.TouristRequest;
 import com.tourismgov.tourist.dto.TouristResponse;
 import com.tourismgov.tourist.dto.TouristSummaryResponse;
 import com.tourismgov.tourist.dto.TouristUpdateRequest;
-import com.tourismgov.tourist.dto.TouristSyncRequest;
 import com.tourismgov.tourist.enums.Status;
+import com.tourismgov.tourist.security.SecurityUtils;
 import com.tourismgov.tourist.service.TouristService;
 
 import jakarta.validation.Valid;
@@ -33,7 +33,8 @@ import lombok.extern.slf4j.Slf4j;
 public class TouristController {
 
 	private final TouristService touristService;
-
+	private final SecurityUtils securityUtils;
+	
 	// Tourist Registration
 	@PostMapping("/create")
 	public ResponseEntity<TouristResponse> createTourist(@Valid @RequestBody TouristRequest request) {
@@ -43,17 +44,19 @@ public class TouristController {
 	}
 
 	// Tourist Profile
-	@GetMapping("/{touristId}")
-	public ResponseEntity<TouristResponse> getTouristProfile(@PathVariable Long touristId) {
-		TouristResponse response = touristService.getTouristById(touristId);
+	@GetMapping("/profile")
+	public ResponseEntity<TouristResponse> getTouristProfile() {
+		Long userId = securityUtils.getCurrentUserId();
+		TouristResponse response = touristService.getTouristById(userId);
 		return ResponseEntity.ok(response);
 	}
 
 	// Tourist Profile (Edit)
-	@PutMapping("/{touristId}/update")
-	public ResponseEntity<TouristResponse> updateTouristProfile(@PathVariable Long touristId,
+	@PutMapping("/update")
+	public ResponseEntity<TouristResponse> updateTouristProfile(
 			@Valid @RequestBody TouristUpdateRequest request) {
-		TouristResponse response = touristService.updateTourist(touristId, request);
+		Long userId = securityUtils.getCurrentUserId();
+		TouristResponse response = touristService.updateTourist(userId, request);
 		return ResponseEntity.ok(response);
 	}
 
@@ -70,14 +73,6 @@ public class TouristController {
 			Pageable pageable) {
 		Page<TouristSummaryResponse> response = touristService.getTouristSummariesByStatus(status, pageable);
 		return ResponseEntity.ok(response);
-	}
-
-	// Internal Sync
-	@PostMapping("/internal/sync")
-	public ResponseEntity<Void> syncTouristProfile(@RequestBody TouristSyncRequest request) {
-		log.info("API: internal sync tourist profile called for user {}", request.getUserId());
-		touristService.syncTouristProfile(request);
-		return ResponseEntity.ok().build();
 	}
 
 }

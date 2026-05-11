@@ -1,25 +1,23 @@
 package com.tourismgov.report.client;
 
+import java.util.List;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 
-import com.tourismgov.report.dto.NotificationDTO;
+import com.tourismgov.report.dto.NotificationRequestDTO; // ✅ Unified DTO
 
-import java.util.List;
-
-@FeignClient(name = "NOTIFICATIONSERVICE")
+@FeignClient(name = "NOTIFICATION-SERVICE")
 public interface NotificationClient {
+	
+    @GetMapping("/tourismgov/v1/notifications/unread")
+    List<NotificationRequestDTO> getUnreadNotifications(@RequestHeader("X-User-Id") Long userId);
 
-    @GetMapping("/tourismgov/v1/notifications/internal/unread")
-    List<NotificationDTO> getUnreadNotifications(@RequestParam("userId") Long userId);
+    @PostMapping("/tourismgov/v1/notifications")
+    void createNotification(@RequestBody NotificationRequestDTO request);
 
-    @PostMapping("/tourismgov/v1/notifications/system-alert")
-    void sendSystemAlert(
-            @RequestParam("userId") Long userId,
-            @RequestParam("entityId") Long entityId,
-            @RequestParam("subject") String subject,
-            @RequestParam("message") String message,
-            @RequestParam("category") String category);
+    @PostMapping("/tourismgov/v1/notifications/broadcast")
+    void sendGlobalBroadcast(@RequestBody NotificationRequestDTO request);
 }

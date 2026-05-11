@@ -5,15 +5,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import lombok.RequiredArgsConstructor;
-
-import org.springframework.core.annotation.Order;
 
 @Configuration
 @EnableWebSecurity
@@ -29,57 +26,32 @@ public class MicroserviceSecurityConfig {
     private final GatewayHeaderFilter gatewayHeaderFilter;
 
     @Bean
-    @Order(1)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(AbstractHttpConfigurer::disable)
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        http
+            .csrf(AbstractHttpConfigurer::disable)
+            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                
-                // ==========================================
-                // 1. TOURIST PROFILE ENDPOINTS (/tourismgov/v1/tourist)
-                // ==========================================
-                // Public Access: Allow anyone to create a new tourist profile
-                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/tourist/create").permitAll()
-                // Internal: Service-to-service sync endpoint (no auth required)
-                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/tourist/internal/**").permitAll()
-
-                // Tourist/Admin Access: A tourist can view/update their own profile, Admins can manage them
-                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/tourist/*").hasAnyRole(TOURIST, ADMIN, OFFICER, MANAGER)
-                .requestMatchers(HttpMethod.PUT, "/tourismgov/v1/tourist/*/update").hasAnyRole(TOURIST, ADMIN, MANAGER)
-
-                // Administrative: Only Admins can view the full list of profiles or delete a tourist
-                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/tourist/admin").hasAnyRole(ADMIN, MANAGER, OFFICER, AUDITOR)
-                .requestMatchers(HttpMethod.DELETE, "/tourismgov/v1/tourist/*").hasRole(ADMIN)
-
-                // ==========================================
-                // 2. TOURIST DOCUMENT ENDPOINTS (/tourismgov/v1/touristdoc)
-                // ==========================================
-                // Tourist Access: Tourists can upload, view, or delete their own documents
-                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/touristdoc/*/documents").hasAnyRole(TOURIST, ADMIN)
-                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/touristdoc/*/documents/*/view").hasAnyRole(TOURIST, OFFICER, ADMIN, MANAGER)
-                .requestMatchers(HttpMethod.DELETE, "/tourismgov/v1/touristdoc/*/documents/*").hasAnyRole(TOURIST, ADMIN)
-
-                // Verification: Only Officers, Managers, or Admins can verify documents
+                // 1. Specific Admin/Officer Actions (Top Priority)
+                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/tourist/admin").hasAnyRole(ADMIN, OFFICER, MANAGER, AUDITOR)
                 .requestMatchers(HttpMethod.PATCH, "/tourismgov/v1/touristdoc/*/documents/*/verify").hasAnyRole(OFFICER, MANAGER, ADMIN)
+                
+                // 2. Public Actions
+                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/tourist/create").permitAll()
+                
+                // 3. General Tourist Actions (Use ** for nested paths if needed)
+                .requestMatchers(HttpMethod.DELETE, "/tourismgov/v1/tourist/*").hasRole(ADMIN)
+                .requestMatchers(HttpMethod.PUT, "/tourismgov/v1/tourist/*/update").hasAnyRole(TOURIST, ADMIN)
+                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/tourist/*").hasAnyRole(TOURIST, ADMIN, OFFICER)
 
-                // ==========================================
-                // 3. FALLBACK
-                // ==========================================
+                // 4. Document Actions
+                .requestMatchers(HttpMethod.DELETE, "/tourismgov/v1/touristdoc/*/documents/*").hasRole(ADMIN)
+                .requestMatchers(HttpMethod.GET, "/tourismgov/v1/touristdoc/*/documents/*/view").hasAnyRole(TOURIST, OFFICER, ADMIN, AUDITOR)
+                .requestMatchers(HttpMethod.POST, "/tourismgov/v1/touristdoc/*/documents").hasAnyRole(TOURIST, OFFICER, ADMIN)
+
                 .anyRequest().authenticated()
             )
             .addFilterBefore(gatewayHeaderFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
-    }
-
-    /**
-     * Completely bypass Spring Security for public endpoints.
-     * This is more reliable than .permitAll() in the filter chain.
-     */
-    @Bean
-    public WebSecurityCustomizer webSecurityCustomizer() {
-        return web -> web.ignoring()
-                .requestMatchers("/tourismgov/v1/tourist/create",
-                                 "/tourismgov/v1/tourist/internal/**");
     }
 }

@@ -26,6 +26,8 @@ import com.tourismgov.user.repository.UserRepository;
 import com.tourismgov.user.security.JwtUtil;
 import com.tourismgov.user.security.SecurityUtils;
 import com.tourismgov.user.client.TouristClient;
+import com.tourismgov.user.client.NotificationClient; // ✅ Added
+import com.tourismgov.user.dto.NotificationRequestDTO; // ✅ Added
 import com.tourismgov.user.dto.TouristSyncRequest;
 import com.tourismgov.user.enums.Role;
 
@@ -54,6 +56,7 @@ public class AuthServiceImpl implements AuthService {
 	private final JwtUtil jwtUtil;
 	private final AuditLogService auditLogService;
 	private final TouristClient touristClient;
+	private final NotificationClient notificationClient; // ✅ Added
 
 	// ---------------- REGISTER ----------------
 
@@ -71,7 +74,6 @@ public class AuthServiceImpl implements AuthService {
 		user.setPassword(passwordEncoder.encode(request.getPassword()));
 		user.setPhone(request.getPhone());
 
-		// ✅ ENUM ASSIGNMENT (CORRECT)
 		user.setRole(request.getRole());
 		user.setStatus(Status.ACTIVE);
 
@@ -81,18 +83,22 @@ public class AuthServiceImpl implements AuthService {
 				RESOURCE_AUTH_SERVICE, STATUS_SUCCESS);
 
 		if (savedUser.getRole() == Role.TOURIST) {
-		    try {
-		        touristClient.syncTouristProfile(TouristSyncRequest.builder()
-		                .userId(savedUser.getUserId())
-		                .name(savedUser.getName())
-		                .email(savedUser.getEmail())
-		                .contactInfo(savedUser.getPhone())
-		                .build());
-		        log.info("Successfully synced tourist profile for user {}", savedUser.getUserId());
-		    } catch (Exception e) {
-		        log.error("Failed to sync tourist profile for user {}: {}", savedUser.getUserId(), e.getMessage());
-		    }
+			try {
+				touristClient.syncTouristProfile(TouristSyncRequest.builder()
+						.userId(savedUser.getUserId())
+						.name(savedUser.getName())
+						.email(savedUser.getEmail())
+						.contactInfo(savedUser.getPhone())
+						.build());
+				log.info("Successfully synced tourist profile for user {}", savedUser.getUserId());
+			} catch (Exception e) {
+				log.error("Failed to sync tourist profile for user {}: {}", savedUser.getUserId(), e.getMessage());
+			}
 		}
+
+		// ✅ Notification: Send private welcome alert
+		String welcomeMsg = "Welcome to TourismGov, " + savedUser.getName() + "! Your account has been created successfully.";
+		sendNotificationSafe(savedUser.getUserId(), savedUser.getUserId(), "Account Created", welcomeMsg, "SYSTEM");
 
 		return mapToUserResponse(savedUser);
 	}
@@ -109,7 +115,6 @@ public class AuthServiceImpl implements AuthService {
 			User user = userRepository.findByEmail(request.getEmail())
 					.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, USER_NOT_FOUND));
 
-			// ✅ ENUM COMPARISON (CORRECT)
 			if (user.getStatus() != Status.ACTIVE) {
 				auditLogService.logAction(user.getUserId(), ACTION_USER_LOGIN, RESOURCE_AUTH_SERVICE, STATUS_FAILED);
 				throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account is not active");
@@ -121,7 +126,6 @@ public class AuthServiceImpl implements AuthService {
 
 			auditLogService.logAction(user.getUserId(), ACTION_USER_LOGIN, RESOURCE_AUTH_SERVICE, STATUS_SUCCESS);
 
-			// ✅ ENUM → STRING ONLY FOR RESPONSE
 			return new AuthResponse(jwt, user.getUserId(), user.getRole().name(), user.getName());
 
 		} catch (AuthenticationException ex) {
@@ -159,6 +163,10 @@ public class AuthServiceImpl implements AuthService {
 		user.setPassword(passwordEncoder.encode(request.getNewPassword()));
 
 		auditLogService.logAction(user.getUserId(), ACTION_UPDATE_PASSWORD, RESOURCE_AUTH_SERVICE, STATUS_SUCCESS);
+
+		// ✅ Notification: Send private security alert
+		String message = "Security Alert: Your password was successfully updated.";
+		sendNotificationSafe(user.getUserId(), user.getUserId(), "Password Updated", message, "SECURITY");
 	}
 
 	// ---------------- RESET PASSWORD (ADMIN) ----------------
@@ -174,9 +182,32 @@ public class AuthServiceImpl implements AuthService {
 
 		auditLogService.logAction(SecurityUtils.getCurrentUserId(), ACTION_RESET_PASSWORD, RESOURCE_AUTH_SERVICE,
 				STATUS_SUCCESS);
+		
+		// ✅ Notification: Notify user that Admin reset their password
+		String message = "Your password has been reset by an administrator.";
+		sendNotificationSafe(user.getUserId(), user.getUserId(), "Password Reset", message, "SECURITY");
 	}
 
-	// ---------------- MAPPER ----------------
+	// ---------------- HELPERS ----------------
+
+	// ✅ Private Helper Method for DTO-based Private Notification
+	private void sendNotificationSafe(Long userId, Long entityId, String subject, String message, String category) {
+		try {
+			NotificationRequestDTO notificationReq = NotificationRequestDTO.builder()
+					.userId(userId)        // Recipient ID
+					.entityId(entityId)    // Related Entity ID (User ID in this context)
+					.subject(subject)
+					.message(message)
+					.category(category)
+					.build();
+
+			notificationClient.createNotification(notificationReq);
+			log.info("Private notification sent successfully to userId: {}", userId);
+		} catch (Exception e) {
+			// Fault-tolerance: Primary action succeeds even if notification fails
+			log.error("Failed to push notification to NOTIFICATION-SERVICE for userId {}: {}", userId, e.getMessage());
+		}
+	}
 
 	private UserResponse mapToUserResponse(User user) {
 		UserResponse dto = new UserResponse();
@@ -184,7 +215,6 @@ public class AuthServiceImpl implements AuthService {
 		dto.setName(user.getName());
 		dto.setEmail(user.getEmail());
 
-		// ✅ PASS ENUMS DIRECTLY
 		dto.setRole(user.getRole());
 		dto.setStatus(user.getStatus());
 
