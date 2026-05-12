@@ -41,14 +41,18 @@ const Navbar = ({ unreadNotifications = 0, latestNotification = null, userName =
 
     /**
      * GLASSY SWITCH EFFECT
-     * Applies a frosted glass background to the active navigation pill
+     * "Connected" Logic: Remains active for sub-routes like /tourist/sites/:id
      */
-    const getLinkClass = (path) => 
-        `relative px-5 py-2 rounded-full transition-all duration-300 flex items-center gap-2 group ${
-            location.pathname === path 
+    const getLinkClass = (path) => {
+        // Specifically for Heritage Sites, remain active if path includes 'site'
+        const isActive = location.pathname === path || (path === '/sites' && location.pathname.includes('site'));
+        
+        return `relative px-5 py-2 rounded-full transition-all duration-300 flex items-center gap-2 group ${
+            isActive 
             ? 'bg-white/30 backdrop-blur-md shadow-lg border border-white/40 text-[#FF6D00] font-black scale-105' 
             : 'text-[#1A237E] hover:bg-white/10 hover:backdrop-blur-sm'
         }`;
+    };
 
     return (
         <div className="absolute top-0 left-0 w-full z-50 p-6">
@@ -81,10 +85,10 @@ const Navbar = ({ unreadNotifications = 0, latestNotification = null, userName =
                                 Notifications
                             </Link>
                             
+                            {/* Connected Heritage Sites link */}
                             <Link to="/sites" className={getLinkClass('/sites')}>Heritage Sites</Link>
-                            <Link to="/events" className={getLinkClass('/events')}>Events</Link>
                             
-                            {/* Programs button placed next to Events as requested */}
+                            <Link to="/events" className={getLinkClass('/events')}>Events</Link>
                             <Link to="/programs" className={getLinkClass('/programs')}>Programs</Link>
                         </>
                     )}
@@ -108,7 +112,6 @@ const Navbar = ({ unreadNotifications = 0, latestNotification = null, userName =
                                     )}
                                 </button>
 
-                                {/* QUICK VIEW DROPDOWN */}
                                 {showLatest && (
                                     <div className="absolute right-0 mt-4 w-72 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 p-5 z-[60]">
                                         <h4 className="text-[10px] font-black uppercase tracking-widest text-[#1A237E] mb-3">Latest Alert</h4>
@@ -132,11 +135,11 @@ const Navbar = ({ unreadNotifications = 0, latestNotification = null, userName =
                                 )}
                             </div>
 
-                            {/* USER PROFILE: Displays Name and Role side-by-side */}
+                            {/* USER PROFILE: Synchronized with localStorage data */}
                             <div className="flex items-center gap-3 bg-[#F8F9FF] pl-5 pr-1.5 py-1.5 rounded-full border border-slate-100 shadow-sm">
                                 <div className="text-right hidden sm:block">
                                     <p className="text-[10px] font-black uppercase text-[#1A237E] leading-none">
-                                        {userName || localStorage.getItem('name') || "User"}
+                                        {localStorage.getItem('name') || userName}
                                     </p>
                                     <p className="text-[8px] font-bold text-[#FF6D00] uppercase tracking-[0.2em]">
                                         {role || "Tourist"}
