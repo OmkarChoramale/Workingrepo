@@ -7,7 +7,9 @@ import com.tourismgov.report.dto.BookingDTO;
 
 import java.util.List;
 
-@FeignClient(name = "EVENTBOOKING-SERVICE")
+import com.tourismgov.report.client.fallback.BookingClientFallback;
+
+@FeignClient(name = "EVENTBOOKING-SERVICE", fallback = BookingClientFallback.class)
 public interface BookingClient {
     @GetMapping("/tourismgov/v1/bookings")
     List<BookingDTO> getAllBookings();

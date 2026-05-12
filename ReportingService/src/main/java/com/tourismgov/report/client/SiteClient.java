@@ -7,7 +7,9 @@ import com.tourismgov.report.dto.SiteDTO;
 
 import java.util.List;
 
-@FeignClient(name = "SITE-SERVICE")
+import com.tourismgov.report.client.fallback.SiteClientFallback;
+
+@FeignClient(name = "SITE-SERVICE", fallback = SiteClientFallback.class)
 public interface SiteClient {
     @GetMapping("/tourismgov/v1/sites")
     List<SiteDTO> getAllSites();

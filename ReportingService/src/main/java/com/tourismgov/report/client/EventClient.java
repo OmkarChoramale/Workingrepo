@@ -7,7 +7,9 @@ import com.tourismgov.report.dto.EventDTO;
 
 import java.util.List;
 
-@FeignClient(name = "EVENTBOOKING-SERVICE")
+import com.tourismgov.report.client.fallback.EventClientFallback;
+
+@FeignClient(name = "EVENTBOOKING-SERVICE", fallback = EventClientFallback.class)
 public interface EventClient {
     @GetMapping("/tourismgov/v1/events")
     List<EventDTO> getAllEvents();

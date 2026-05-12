@@ -8,7 +8,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 import com.tourismgov.notification.dto.UserDTO;
 
-@FeignClient(name = "USER-SERVICE")
+import com.tourismgov.notification.client.fallback.UserClientFallback;
+
+@FeignClient(name = "USER-SERVICE", fallback = UserClientFallback.class)
 public interface UserClient {
 
     @GetMapping("/tourismgov/v1/users/{id}")
