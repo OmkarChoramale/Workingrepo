@@ -87,9 +87,11 @@ const Navbar = ({ unreadNotifications = 0, latestNotification = null, userName =
                             
                             {/* Connected Heritage Sites link */}
                             <Link to="/sites" className={getLinkClass('/sites')}>Heritage Sites</Link>
-                            
                             <Link to="/events" className={getLinkClass('/events')}>Events</Link>
                             <Link to="/programs" className={getLinkClass('/programs')}>Programs</Link>
+                            {(role === 'COMPLIANCE' || role === 'AUDITOR' || role === 'ADMIN') && (
+                                <Link to="/compliance" className={getLinkClass('/compliance')}>Compliance</Link>
+                            )}
                         </>
                     )}
                 </div>

@@ -1,86 +1,98 @@
 import axios from 'axios';
 
-// The Gateway (GatewayAPI) port from your Eureka status
-const API_BASE_URL = 'http://localhost:8383'; 
+const API_BASE_URL = 'http://localhost:8383';
 
 const api = axios.create({
     baseURL: API_BASE_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
 });
 
-/**
- * AUTH INTERCEPTOR
- * Automatically attaches the JWT token from localStorage to every request.
- * The Gateway will decode this to populate the 'X-User-Id' and 'X-User-Roles' 
- * headers expected by your Java controllers.
- */
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
+    if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
-}, (error) => {
-    return Promise.reject(error);
-});
+}, (error) => Promise.reject(error));
 
-/**
- * ─── NOTIFICATION API (Module 8) ───────────────────────────────────────────
- * Maps to NotificationController.java
- */
+// ─── NOTIFICATION API ────────────────────────────────────────────────────────
 export const notificationApi = {
-    // 1. GET all notifications
     getAll: () => api.get('/tourismgov/v1/notifications'),
-
-    // 2. GET unread notifications
     getUnread: () => api.get('/tourismgov/v1/notifications/unread'),
-
-    // 3. GET notifications by category
     getByCategory: (category) => api.get(`/tourismgov/v1/notifications/category/${category}`),
-
-    // 4. PATCH mark a single notification as READ
     markAsRead: (id) => api.patch(`/tourismgov/v1/notifications/${id}/read`),
-
-    // 5. PATCH mark ALL notifications as READ
     markAllAsRead: () => api.patch('/tourismgov/v1/notifications/read-all'),
-
-    // 6. POST create a direct targeted notification
     create: (data) => api.post('/tourismgov/v1/notifications', data),
-
-    // 7. POST broadcast to ALL users
     broadcast: (data) => api.post('/tourismgov/v1/notifications/broadcast', data)
 };
 
-/**
- * ─── DASHBOARD API ────────────────────────────────────────────────────────
- * Maps to DashboardController.java
- */
+// ─── DASHBOARD API ────────────────────────────────────────────────────────────
 export const dashboardApi = {
-    /**
-     * Fetch aggregated metrics based on user role and ID.
-     * Note: The backend expects X-User-Roles and X-User-Id headers,
-     * which are typically injected by your Gateway from the JWT.
-     */
     getStats: () => api.get('/tourismgov/v1/dashboard/stats')
 };
 
-/**
- * ─── REPORT API (Module 7) ────────────────────────────────────────────────
- * Maps to ReportController.java
- */
+// ─── REPORT API ───────────────────────────────────────────────────────────────
 export const reportApi = {
-    // 1. POST generate a new report
     generate: (data) => api.post('/tourismgov/v1/reports/generate', data),
-
-    // 2. GET report history with optional filters (scope/date)
     getHistory: (params) => api.get('/tourismgov/v1/reports/history', { params }),
+    download: (id) => api.get(`/tourismgov/v1/reports/download/${id}`, { responseType: 'blob' })
+};
 
-    // 3. GET download report as .txt file
-    download: (id) => api.get(`/tourismgov/v1/reports/download/${id}`, {
-        responseType: 'blob' // Crucial for handling byte[] data from backend
-    })
+// ─── HERITAGE SITES API ───────────────────────────────────────────────────────
+export const siteApi = {
+    getAll: () => api.get('/tourismgov/v1/sites'),
+    getById: (id) => api.get(`/tourismgov/v1/sites/${id}`),
+    create: (data) => api.post('/tourismgov/v1/sites', data),
+    update: (id, data) => api.put(`/tourismgov/v1/sites/${id}`, data),
+    delete: (id) => api.delete(`/tourismgov/v1/sites/${id}`)
+};
+
+// ─── EVENTS API ───────────────────────────────────────────────────────────────
+export const eventApi = {
+    getAll: () => api.get('/tourismgov/v1/events'),
+    getById: (id) => api.get(`/tourismgov/v1/events/${id}`),
+    getBySite: (siteId) => api.get(`/tourismgov/v1/events/site/${siteId}`),
+    getByProgram: (programId) => api.get(`/tourismgov/v1/events/program/${programId}`),
+    getPaged: (params) => api.get('/tourismgov/v1/events/paged', { params }),
+    create: (data) => api.post('/tourismgov/v1/events', data),
+    update: (id, data) => api.put(`/tourismgov/v1/events/${id}`, data),
+    updateStatus: (id, data) => api.patch(`/tourismgov/v1/events/${id}/status`, data),
+    delete: (id) => api.delete(`/tourismgov/v1/events/${id}`)
+};
+
+// ─── BOOKINGS API ─────────────────────────────────────────────────────────────
+export const bookingApi = {
+    create: (eventId, data) => api.post(`/tourismgov/v1/events/${eventId}/bookings`, data),
+    getById: (id) => api.get(`/tourismgov/v1/bookings/${id}`),
+    getByEvent: (eventId) => api.get(`/tourismgov/v1/events/${eventId}/bookings`),
+    getByTourist: (touristId) => api.get(`/tourismgov/v1/bookings/tourist/${touristId}`),
+    updateStatus: (id, data) => api.patch(`/tourismgov/v1/bookings/${id}/status`, data),
+    getAllPaged: (params) => api.get('/tourismgov/v1/bookings/paged', { params })
+};
+
+// ─── PROGRAMS API ─────────────────────────────────────────────────────────────
+export const programApi = {
+    getAll: () => api.get('/tourismgov/v1/programs'),
+    getById: (id) => api.get(`/tourismgov/v1/programs/${id}`),
+    getPaged: (params) => api.get('/tourismgov/v1/programs/paged', { params }),
+    create: (data) => api.post('/tourismgov/v1/programs', data),
+    update: (id, data) => api.put(`/tourismgov/v1/programs/${id}`, data),
+    updateStatus: (id, status) => api.patch(`/tourismgov/v1/programs/${id}/status`, null, { params: { status } }),
+    delete: (id) => api.delete(`/tourismgov/v1/programs/${id}`),
+    getBudgetReport: (id) => api.get(`/tourismgov/v1/programs/${id}/budget-report`)
+};
+
+// ─── COMPLIANCE API ───────────────────────────────────────────────────────────
+export const complianceApi = {
+    getAll: (params) => api.get('/tourismgov/v1/compliance/records', { params }),
+    getById: (id) => api.get(`/tourismgov/v1/compliance/records/${id}`),
+    create: (data) => api.post('/tourismgov/v1/compliance/records', data),
+    updateResult: (id, result) => api.patch(`/tourismgov/v1/compliance/records/${id}/result`, null, { params: { result } }),
+    delete: (id) => api.delete(`/tourismgov/v1/compliance/records/${id}`)
+};
+
+// ─── AUTH API ─────────────────────────────────────────────────────────────────
+export const authApi = {
+    login: (data) => api.post('/tourismgov/v1/auth/login', data),
+    register: (data) => api.post('/tourismgov/v1/auth/register', data)
 };
 
 export default api;
