@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
+import { NotificationProvider } from './context/NotificationContext';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -20,45 +21,34 @@ function PrivateRoute({ children }) {
 }
 
 function App() {
-  const [authState, setAuthState] = useState({
-    isLoggedIn: !!localStorage.getItem('token'),
-    userRole: localStorage.getItem('role') || 'TOURIST',
-    userName: localStorage.getItem('name') || 'User',
-    unreadNotifications: 0
-  });
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const role = localStorage.getItem('role');
-    const name = localStorage.getItem('name');
-    if (token) {
-      setAuthState(prev => ({ ...prev, isLoggedIn: true, userRole: role, userName: name }));
-    }
-  }, []);
+  const isLoggedIn = !!localStorage.getItem('token');
+  const userRole = localStorage.getItem('role') || 'TOURIST';
 
   return (
     <Router>
-      <div className="relative min-h-screen bg-[#FFFDF7]">
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Home isLoggedIn={authState.isLoggedIn} userRole={authState.userRole} />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+      <NotificationProvider>
+        <div className="relative min-h-screen bg-[#FFFDF7]">
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<Home isLoggedIn={isLoggedIn} userRole={userRole} />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
 
-          {/* Protected Routes */}
-          <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-          <Route path="/reports" element={<PrivateRoute><ReportPage isLoggedIn={authState.isLoggedIn} userRole={authState.userRole} /></PrivateRoute>} />
-          <Route path="/notifications" element={<PrivateRoute><NotificationsPage /></PrivateRoute>} />
-          <Route path="/sites" element={<PrivateRoute><TouristHeritageSites /></PrivateRoute>} />
-          <Route path="/tourist/sites/:siteId" element={<PrivateRoute><HeritageSiteDetails /></PrivateRoute>} />
-          <Route path="/events" element={<PrivateRoute><EventsPage /></PrivateRoute>} />
-          <Route path="/programs" element={<PrivateRoute><ProgramsPage /></PrivateRoute>} />
-          <Route path="/compliance" element={<PrivateRoute><CompliancePage /></PrivateRoute>} />
+            {/* Protected Routes */}
+            <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+            <Route path="/reports" element={<PrivateRoute><ReportPage isLoggedIn={isLoggedIn} userRole={userRole} /></PrivateRoute>} />
+            <Route path="/notifications" element={<PrivateRoute><NotificationsPage /></PrivateRoute>} />
+            <Route path="/sites" element={<PrivateRoute><TouristHeritageSites /></PrivateRoute>} />
+            <Route path="/tourist/sites/:siteId" element={<PrivateRoute><HeritageSiteDetails /></PrivateRoute>} />
+            <Route path="/events" element={<PrivateRoute><EventsPage /></PrivateRoute>} />
+            <Route path="/programs" element={<PrivateRoute><ProgramsPage /></PrivateRoute>} />
+            <Route path="/compliance" element={<PrivateRoute><CompliancePage /></PrivateRoute>} />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </div>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </div>
+      </NotificationProvider>
     </Router>
   );
 }

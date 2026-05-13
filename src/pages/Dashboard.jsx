@@ -2,21 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Calendar, Users, Wallet, ShieldCheck, Clock, TrendingUp, Loader2, FileSearch, Bell, Activity, Zap, CheckCircle, AlertTriangle, BarChart2, PieChart, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, RadialBarChart, RadialBar, PieChart as RechartsPie, Pie, Cell, Tooltip, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
-import { dashboardApi, notificationApi } from '../services/api';
+import { dashboardApi, notificationApi, siteApi, eventApi, programApi } from '../services/api';
+import { useNotifications } from '../context/NotificationContext';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 
 const COLORS = ['#FF6D00', '#1A237E', '#00C49F', '#FFBB28', '#a855f7', '#ec4899'];
-const MONTHLY = [
-  { m: 'Jan', bookings: 40, events: 24, visitors: 120 },
-  { m: 'Feb', bookings: 55, events: 30, visitors: 180 },
-  { m: 'Mar', bookings: 35, events: 18, visitors: 140 },
-  { m: 'Apr', bookings: 70, events: 42, visitors: 220 },
-  { m: 'May', bookings: 62, events: 36, visitors: 200 },
-  { m: 'Jun', bookings: 90, events: 50, visitors: 310 },
-];
-const SITE_STATUS = [{ name: 'Active', value: 60 }, { name: 'Maintenance', value: 25 }, { name: 'Inactive', value: 15 }];
-const RADIAL_DATA = [{ name: 'Compliance', value: 85, fill: '#00C49F' }, { name: 'Bookings', value: 70, fill: '#FF6D00' }, { name: 'Events', value: 92, fill: '#1A237E' }];
 
 const metricIcon = (key) => {
   const k = key.toLowerCase();
@@ -32,14 +23,15 @@ const metricIcon = (key) => {
   return <TrendingUp size={22} />;
 };
 
-const metricColor = (key, role) => {
+const metricColor = (key) => {
   const k = key.toLowerCase();
   if (k.includes('violation') || k.includes('fail')) return { bg: 'from-rose-500 to-red-600', glow: 'shadow-rose-400/30' };
   if (k.includes('budget')) return { bg: 'from-emerald-500 to-teal-600', glow: 'shadow-emerald-400/30' };
   if (k.includes('site')) return { bg: 'from-orange-500 to-amber-600', glow: 'shadow-orange-400/30' };
   if (k.includes('event')) return { bg: 'from-purple-500 to-violet-600', glow: 'shadow-purple-400/30' };
   if (k.includes('booking')) return { bg: 'from-cyan-500 to-sky-600', glow: 'shadow-cyan-400/30' };
-  if (role === 'ADMIN' || role === 'MANAGER') return { bg: 'from-indigo-600 to-blue-700', glow: 'shadow-indigo-400/30' };
+  if (k.includes('program')) return { bg: 'from-indigo-500 to-blue-600', glow: 'shadow-indigo-400/30' };
+  if (k.includes('user') || k.includes('tourist')) return { bg: 'from-pink-500 to-rose-500', glow: 'shadow-pink-400/30' };
   return { bg: 'from-[#FF6D00] to-orange-600', glow: 'shadow-orange-400/30' };
 };
 
@@ -60,19 +52,81 @@ const StatCard = ({ label, value, icon, colorObj, index }) => (
   </motion.div>
 );
 
+const formatTime = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+};
+
+const CATEGORY_ICON = {
+  SYSTEM_CREATE: '⭐',
+  TRANSACTIONAL: '💳',
+  SYSTEM_UPDATE: '🔄',
+  ACTION_REQUIRED: '⚠️',
+  COMPLIANCE: '🛡️',
+  ANNOUNCEMENT: '📢',
+  SYSTEM: '🔔',
+};
+
+const CATEGORY_COLOR = {
+  SYSTEM_CREATE: 'bg-emerald-600',
+  TRANSACTIONAL: 'bg-blue-600',
+  SYSTEM_UPDATE: 'bg-amber-500',
+  ACTION_REQUIRED: 'bg-rose-600',
+  COMPLIANCE: 'bg-violet-600',
+  ANNOUNCEMENT: 'bg-sky-600',
+  SYSTEM: 'bg-indigo-600',
+};
+
 export default function Dashboard() {
   const [data, setData] = useState(null);
-  const [latestNotif, setLatestNotif] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+
+  // Real-time data for charts
+  const [siteStatusData, setSiteStatusData] = useState([]);
+  const [recentNotifs, setRecentNotifs] = useState([]);
+
+  // Pull unread count from global context
+  const { unreadCount } = useNotifications();
 
   useEffect(() => {
     (async () => {
       try {
-        const [dashRes, notifRes] = await Promise.allSettled([dashboardApi.getStats(), notificationApi.getUnread()]);
+        const [dashRes, notifRes, siteRes] = await Promise.allSettled([
+          dashboardApi.getStats(),
+          notificationApi.getAll(),
+          siteApi.getAll(),
+        ]);
+
         if (dashRes.status === 'fulfilled') setData(dashRes.value.data);
-        if (notifRes.status === 'fulfilled' && notifRes.value.data?.length > 0) setLatestNotif(notifRes.value.data[0]);
-      } catch (e) { console.error(e); } finally { setLoading(false); }
+
+        if (notifRes.status === 'fulfilled') {
+          const notifs = notifRes.value.data || [];
+          setRecentNotifs(notifs.slice(0, 8));
+        }
+
+        if (siteRes.status === 'fulfilled') {
+          const sites = siteRes.value.data || [];
+          // Build real site status distribution
+          const statusCount = sites.reduce((acc, s) => {
+            const st = s.status || 'UNKNOWN';
+            acc[st] = (acc[st] || 0) + 1;
+            return acc;
+          }, {});
+          setSiteStatusData(Object.entries(statusCount).map(([name, value]) => ({ name, value })));
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -87,11 +141,17 @@ export default function Dashboard() {
   const metrics = data?.metrics ? Object.entries(data.metrics) : [];
   const role = data?.role || localStorage.getItem('role') || 'TOURIST';
   const userName = data?.userName || localStorage.getItem('name') || 'User';
-  const unread = data?.unreadNotifications || 0;
+
+  // Build radial data from real metrics
+  const radialData = [
+    { name: 'Sites', value: Math.min(100, ((data?.metrics?.totalHeritageSites || data?.metrics?.totalSites || 0) / 30) * 100), fill: '#FF6D00' },
+    { name: 'Events', value: Math.min(100, ((data?.metrics?.activeEvents || data?.metrics?.totalEvents || 0) / 10) * 100), fill: '#1A237E' },
+    { name: 'Programs', value: Math.min(100, ((data?.metrics?.activePrograms || data?.metrics?.totalPrograms || 0) / 10) * 100), fill: '#00C49F' },
+  ].filter(d => d.value > 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#f0f4ff] via-[#fafbff] to-[#fff8f0] text-[#1A237E] font-sans flex flex-col">
-      <Navbar unreadNotifications={unread} latestNotification={latestNotif} />
+      <Navbar />
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 md:px-6 pt-28 pb-20">
 
         {/* Hero Banner */}
@@ -114,7 +174,7 @@ export default function Dashboard() {
             <div className="flex gap-3">
               <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 text-center">
                 <Bell size={20} className="text-[#FF6D00] mx-auto mb-1" />
-                <p className="text-2xl font-black text-white">{unread}</p>
+                <p className="text-2xl font-black text-white">{unreadCount}</p>
                 <p className="text-[9px] text-white/50 uppercase tracking-widest">Alerts</p>
               </div>
               <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 text-center">
@@ -137,12 +197,13 @@ export default function Dashboard() {
         </div>
 
         <AnimatePresence mode="wait">
+          {/* OVERVIEW TAB — Real metrics from API */}
           {activeTab === 'overview' && (
             <motion.div key="ov" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
               {metrics.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-10">
                   {metrics.map(([key, value], i) => (
-                    <StatCard key={key} index={i} label={key} value={value} icon={metricIcon(key)} colorObj={metricColor(key, role)} />
+                    <StatCard key={key} index={i} label={key} value={value} icon={metricIcon(key)} colorObj={metricColor(key)} />
                   ))}
                 </div>
               ) : (
@@ -151,31 +212,44 @@ export default function Dashboard() {
                   <p className="font-black text-slate-400 uppercase text-xs tracking-widest">Backend unavailable — metrics pending sync</p>
                 </div>
               )}
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Recent Notifications feed */}
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
                   className="lg:col-span-2 bg-white rounded-3xl p-6 shadow-xl border border-slate-50">
                   <div className="flex items-center justify-between mb-6">
                     <div>
-                      <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight">Activity Overview</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Monthly Trend</p>
+                      <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight">Recent Notifications</h3>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Live System Feed</p>
                     </div>
-                    <BarChart2 size={20} className="text-[#FF6D00]" />
+                    <Bell size={20} className="text-[#FF6D00]" />
                   </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <AreaChart data={MONTHLY}>
-                      <defs>
-                        <linearGradient id="bg1" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#FF6D00" stopOpacity={0.3}/><stop offset="95%" stopColor="#FF6D00" stopOpacity={0}/></linearGradient>
-                        <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#1A237E" stopOpacity={0.3}/><stop offset="95%" stopColor="#1A237E" stopOpacity={0}/></linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="m" tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                      <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                      <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 40px rgba(0,0,0,0.1)', fontSize: 11 }} />
-                      <Area type="monotone" dataKey="bookings" stroke="#FF6D00" strokeWidth={2} fill="url(#bg1)" name="Bookings" />
-                      <Area type="monotone" dataKey="events" stroke="#1A237E" strokeWidth={2} fill="url(#bg2)" name="Events" />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                    {recentNotifs.length > 0 ? recentNotifs.slice(0, 6).map((n, i) => (
+                      <motion.div key={n.notificationId || i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}
+                        className="flex items-center gap-4 py-3 px-3 border-b border-slate-50 last:border-0 hover:bg-slate-50/60 rounded-2xl transition-all">
+                        <div className={`w-9 h-9 rounded-xl ${CATEGORY_COLOR[n.category] || 'bg-slate-400'} flex items-center justify-center text-white text-sm flex-shrink-0`}>
+                          {CATEGORY_ICON[n.category] || '🔔'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-700 truncate">{n.subject}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{n.message}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{formatTime(n.createdDate)}</span>
+                          {n.status === 'UNREAD' && <div className="w-2 h-2 bg-[#FF6D00] rounded-full ml-auto mt-1 animate-pulse" />}
+                        </div>
+                      </motion.div>
+                    )) : (
+                      <div className="text-center py-10 text-slate-300">
+                        <Bell size={32} className="mx-auto mb-2 opacity-40" />
+                        <p className="text-[10px] font-black uppercase tracking-widest">No notifications yet</p>
+                      </div>
+                    )}
+                  </div>
                 </motion.div>
+
+                {/* Real Site Status Distribution */}
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
                   className="bg-white rounded-3xl p-6 shadow-xl border border-slate-50">
                   <div className="flex items-center justify-between mb-4">
@@ -185,98 +259,137 @@ export default function Dashboard() {
                     </div>
                     <PieChart size={20} className="text-[#FF6D00]" />
                   </div>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <RechartsPie>
-                      <Pie data={SITE_STATUS} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={4} dataKey="value">
-                        {SITE_STATUS.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
-                      </Pie>
-                      <Tooltip contentStyle={{ borderRadius: '12px', fontSize: 11 }} />
-                    </RechartsPie>
-                  </ResponsiveContainer>
-                  <div className="space-y-2 mt-2">
-                    {SITE_STATUS.map((item, i) => (
-                      <div key={i} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2.5 h-2.5 rounded-full" style={{ background: COLORS[i] }} />
-                          <span className="text-[10px] font-bold text-slate-500">{item.name}</span>
-                        </div>
-                        <span className="text-[10px] font-black text-[#1A237E]">{item.value}%</span>
+                  {siteStatusData.length > 0 ? (
+                    <>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <RechartsPie>
+                          <Pie data={siteStatusData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={4} dataKey="value">
+                            {siteStatusData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                          </Pie>
+                          <Tooltip contentStyle={{ borderRadius: '12px', fontSize: 11 }} />
+                        </RechartsPie>
+                      </ResponsiveContainer>
+                      <div className="space-y-2 mt-2">
+                        {siteStatusData.map((item, i) => (
+                          <div key={i} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2.5 h-2.5 rounded-full" style={{ background: COLORS[i % COLORS.length] }} />
+                              <span className="text-[10px] font-bold text-slate-500">{item.name}</span>
+                            </div>
+                            <span className="text-[10px] font-black text-[#1A237E]">{item.value}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-12 text-slate-300">
+                      <MapPin size={32} className="mx-auto mb-2 opacity-40" />
+                      <p className="text-[10px] font-black uppercase tracking-widest">No site data</p>
+                    </div>
+                  )}
                 </motion.div>
               </div>
             </motion.div>
           )}
 
+          {/* ANALYTICS TAB */}
           {activeTab === 'analytics' && (
             <motion.div key="an" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
               className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-50">
-                <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight mb-1">Monthly Visitors</h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-6">Heritage Site Traffic</p>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={MONTHLY} barSize={22}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="m" tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                    <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', fontSize: 11 }} />
-                    <Bar dataKey="visitors" name="Visitors" radius={[8, 8, 0, 0]}>
-                      {MONTHLY.map((_, i) => <Cell key={i} fill={i % 2 === 0 ? '#FF6D00' : '#1A237E'} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-50">
-                <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight mb-1">Performance Scores</h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">System Health</p>
-                <ResponsiveContainer width="100%" height={220}>
-                  <RadialBarChart cx="50%" cy="50%" innerRadius="30%" outerRadius="90%" data={RADIAL_DATA} startAngle={90} endAngle={-270}>
-                    <RadialBar minAngle={15} dataKey="value" clockWise background={{ fill: '#f8fafc' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', fontSize: 11 }} />
-                    <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
-                  </RadialBarChart>
-                </ResponsiveContainer>
-              </div>
+              {/* KPI Cards from real data */}
               {[
-                { label: 'Site Activity Rate', value: data?.metrics?.siteActivityPct || '—', trend: 12 },
-                { label: 'Active Events', value: data?.metrics?.activeEvents ?? '—', trend: 5 },
-                { label: 'Total Bookings', value: data?.metrics?.totalBookings ?? '—', trend: -3 },
-                { label: 'Unread Alerts', value: unread, trend: unread > 0 ? -1 : 0 },
+                { label: 'Heritage Sites', value: data?.metrics?.totalHeritageSites ?? data?.metrics?.totalSites ?? '—', trend: 5, up: true },
+                { label: 'Total Events', value: data?.metrics?.totalEvents ?? data?.metrics?.activeEvents ?? '—', trend: 8, up: true },
+                { label: 'Total Users', value: data?.metrics?.totalUsers ?? '—', trend: 3, up: true },
+                { label: 'Unread Alerts', value: unreadCount, trend: unreadCount, up: false },
               ].map((kpi, i) => (
                 <motion.div key={i} whileHover={{ scale: 1.02 }} className="bg-white rounded-3xl p-6 shadow-xl border border-slate-50 flex items-center gap-6">
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
-                    <p className="text-3xl font-black text-[#1A237E]">{kpi.value}</p>
+                    <p className="text-4xl font-black text-[#1A237E]">{kpi.value}</p>
                   </div>
                   <div className="ml-auto text-right">
-                    {kpi.trend >= 0 ? <ArrowUpRight className="text-emerald-500 ml-auto" size={28} /> : <ArrowDownRight className="text-rose-500 ml-auto" size={28} />}
-                    <p className={`text-xs font-black ${kpi.trend >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{Math.abs(kpi.trend)}%</p>
+                    {kpi.up ? <ArrowUpRight className="text-emerald-500 ml-auto" size={28} /> : <ArrowDownRight className="text-rose-500 ml-auto" size={28} />}
+                    <p className={`text-xs font-black ${kpi.up ? 'text-emerald-500' : 'text-rose-500'}`}>Live</p>
                   </div>
                 </motion.div>
               ))}
+
+              {/* Site Status Pie — full size */}
+              <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-50 lg:col-span-1">
+                <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight mb-1">Heritage Site Status</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">Real-time from SiteService</p>
+                {siteStatusData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={siteStatusData} barSize={32}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                      <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', fontSize: 11 }} />
+                      <Bar dataKey="value" name="Sites" radius={[8, 8, 0, 0]}>
+                        {siteStatusData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-48 text-slate-200 font-black uppercase text-xs tracking-widest">No site data available</div>
+                )}
+              </div>
+
+              {/* Radial performance */}
+              <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-50 lg:col-span-1">
+                <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight mb-1">System Capacity</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">Sites / Events / Programs</p>
+                {radialData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <RadialBarChart cx="50%" cy="50%" innerRadius="30%" outerRadius="90%" data={radialData} startAngle={90} endAngle={-270}>
+                      <RadialBar minAngle={15} dataKey="value" clockWise background={{ fill: '#f8fafc' }} />
+                      <Tooltip contentStyle={{ borderRadius: '12px', fontSize: 11 }} />
+                      <Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+                    </RadialBarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-48 text-slate-200 font-black uppercase text-xs tracking-widest">Insufficient data</div>
+                )}
+              </div>
             </motion.div>
           )}
 
+          {/* ACTIVITY TAB — Real notifications */}
           {activeTab === 'activity' && (
             <motion.div key="ac" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
               <div className="bg-white rounded-3xl p-8 shadow-xl border border-slate-50">
-                <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight mb-6">Recent System Events</h3>
-                {[
-                  { icon: '⭐', color: 'bg-amber-500', text: 'New Heritage Site registered: Hampi North', time: '2m ago' },
-                  { icon: '👤', color: 'bg-blue-600', text: 'Tourist #4821 booked Ajanta Caves event', time: '15m ago' },
-                  { icon: '✅', color: 'bg-emerald-600', text: 'Compliance audit completed for Site #12', time: '1h ago' },
-                  { icon: '🔔', color: 'bg-[#FF6D00]', text: 'Broadcast notification sent to all users', time: '2h ago' },
-                  { icon: '📊', color: 'bg-purple-600', text: 'Monthly report SITE generated', time: '3h ago' },
-                  { icon: '🌐', color: 'bg-teal-600', text: 'Program "Heritage Trail 2026" activated', time: '5h ago' },
-                ].map((ev, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.07 }}
-                    className="flex items-center gap-5 py-4 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 rounded-2xl px-2 transition-all">
-                    <div className={`w-9 h-9 rounded-xl ${ev.color} flex items-center justify-center text-white text-sm flex-shrink-0`}>{ev.icon}</div>
-                    <p className="text-sm font-semibold text-slate-600 flex-1">{ev.text}</p>
-                    <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest whitespace-nowrap">{ev.time}</span>
-                  </motion.div>
-                ))}
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="font-black text-[#1A237E] text-sm uppercase tracking-tight">Live System Events</h3>
+                  <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full">● Real Data</span>
+                </div>
+                {recentNotifs.length > 0 ? (
+                  <div className="space-y-1">
+                    {recentNotifs.map((n, i) => (
+                      <motion.div key={n.notificationId || i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.07 }}
+                        className="flex items-center gap-5 py-4 border-b border-slate-50 last:border-0 hover:bg-slate-50/50 rounded-2xl px-2 transition-all">
+                        <div className={`w-9 h-9 rounded-xl ${CATEGORY_COLOR[n.category] || 'bg-slate-400'} flex items-center justify-center text-white text-sm flex-shrink-0`}>
+                          {CATEGORY_ICON[n.category] || '🔔'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-700 truncate">{n.subject}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{n.message}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest whitespace-nowrap">{formatTime(n.createdDate)}</span>
+                          {n.status === 'UNREAD' && (
+                            <span className="block text-[8px] font-black text-[#FF6D00] uppercase mt-0.5">Unread</span>
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-20">
+                    <Bell size={48} className="mx-auto text-slate-200 mb-4" />
+                    <p className="font-black text-slate-300 uppercase text-xs tracking-widest">No system events yet</p>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

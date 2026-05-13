@@ -5,10 +5,12 @@ import {
   ChevronDown, ShieldAlert
 } from 'lucide-react';
 import { notificationApi } from '../services/api';
+import { useNotifications } from '../context/NotificationContext';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 
 const NotificationsPage = () => {
+    const { refresh: refreshGlobalCount } = useNotifications();
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [statusFilter, setStatusFilter] = useState('ALL'); 
@@ -45,11 +47,11 @@ const NotificationsPage = () => {
         setFocusedNotif(notif);
         if (notif.status === 'UNREAD') {
             try {
-                // Triggers single read update in NotificationController
                 await notificationApi.markAsRead(notif.notificationId); 
                 setNotifications(prev => prev.map(n => 
                     n.notificationId === notif.notificationId ? { ...n, status: 'READ' } : n
                 ));
+                refreshGlobalCount(); // update bell icon count immediately
             } catch (err) {
                 console.error("Status Update Failed:", err);
             }
@@ -58,9 +60,9 @@ const NotificationsPage = () => {
 
     const handleMarkAllAsRead = async () => {
         try {
-            // Triggers bulk update in NotificationController
             await notificationApi.markAllAsRead(); 
             setNotifications(prev => prev.map(n => ({ ...n, status: 'READ' })));
+            refreshGlobalCount(); // update bell icon count immediately
         } catch (err) {
             console.error("Bulk Update Failed:", err);
         }
